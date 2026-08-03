@@ -1,46 +1,359 @@
+using System;
 using UnityEngine;
 
 namespace Game.CharacterInput
 {
     /// <summary>
-    /// 移動を担当する最小単位のDriver。MoveCommand/IdleCommandを見て、
-    /// 俯瞰視点前提でXZ平面上をRigidbodyで移動させる。
-    /// あわせて、モーション(Animator)への反映例も持たせてある
-    /// (Ownerにアニメーターが無いキャラクターでは何もしない安全な作り)。
+    /// 通常時は入力方向へ旋回して前進する。
+    /// Hキーを押している間は原点をロックオンし、
+    /// 原点を向いたまま前後移動・左右移動を行う。
     /// </summary>
     public class MoveDriver : CharacterDriverBase
     {
         public override int Priority => 100;
 
+        /// <summary>
+        /// 通常移動時の回転追従速度。
+        /// </summary>
+        private const float RotationSharpness = 12.0f;
+
+        /// <summary>
+        /// ロックオン時の回転追従速度。
+        /// </summary>
+        private const float LockOnRotationSharpness = 18.0f;
+
+        /// <summary>
+        /// 今回ロックオンする固定座標。
+        /// </summary>
+        private static readonly Vector3 LockOnPosition = Vector3.zero;
+
         private Animator _animator;
         private bool _animatorResolved;
 
+        private Camera _movementCamera;
+
         public override void Execute(CharacterContext context)
         {
-            Vector2 direction = Vector2.zero;
+            if (_movementCamera == null)
+            {
+                _movementCamera = Camera.main;
+            }
+            Vector2 inputDirection = FindMoveDirection(context);
+            float inputMagnitude = Clamp01(inputDirection.magnitude);
 
+            bool isLockOn = Input.GetKey(KeyCode.H);
+
+            if (isLockOn)
+            {
+                ExecuteLockOnMovement(
+                    inputDirection,
+                    inputMagnitude,
+                    Time.deltaTime);
+            }
+            else
+            {
+                ExecuteNormalMovement(
+                    inputDirection,
+                    inputMagnitude,
+                    Time.deltaTime);
+            }
+
+            ApplyMotion(inputDirection, inputMagnitude, isLockOn);
+        }
+
+        /// <summary>
+        /// 通常時の移動処理。
+        /// 入力方向へ体を回転させ、現在の前方へ進む。
+        /// </summary>
+        private void ExecuteNormalMovement(
+            Vector2 inputDirection,
+            float inputMagnitude,
+            float deltaTime)
+        {
+            if (inputMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            RotateToInputDirection(inputDirection, deltaTime);
+            MoveForward(inputMagnitude, deltaTime);
+        }
+
+        /// <summary>
+        /// ロックオン中の移動処理。
+        /// 原点を向き続けながら、前後移動と左右移動を行う。
+        /// </summary>
+        private void ExecuteLockOnMovement(
+    Vector2 inputDirection,
+    float inputMagnitude,
+    float deltaTime)
+        {
+            Vector3 toTarget = LockOnPosition - Owner.transform.position;
+
+            // 高低差を無視して、XZ平面上でロックオン対象を向く
+            toTarget.y = 0.0f;
+
+            float targetDistanceSq =
+                toTarget.x * toTarget.x +
+                toTarget.z * toTarget.z;
+
+            if (targetDistanceSq > 0.000001f)
+            {
+                RotateToWorldDirection(
+                    toTarget,
+                    LockOnRotationSharpness,
+                    deltaTime);
+            }
+
+            if (inputMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            // 移動方向はロックオン対象ではなくカメラを基準にする
+            MoveAroundLockOnTarget(
+                inputDirection,
+                inputMagnitude,
+                deltaTime);
+        }
+
+        /// <summary>
+        /// カメラの画面上方向に対応するワールド方向をXZ平面上で取得する。
+        /// </summary>
+        private Vector3 GetCameraForwardOnXZ()
+        {
+            if (_movementCamera == null)
+            {
+                _movementCamera = Camera.main;
+            }
+
+            if (_movementCamera == null)
+            {
+                // MainCameraが見つからない場合はワールドの+Z方向を使う
+                return new Vector3(0.0f, 0.0f, 1.0f);
+            }
+
+            Vector3 cameraForward = _movementCamera.transform.forward;
+            cameraForward.y = 0.0f;
+
+            float forwardLengthSq =
+                cameraForward.x * cameraForward.x +
+                cameraForward.z * cameraForward.z;
+
+            // カメラが完全に真下を向いていると、
+            // forwardをXZ平面へ投影した結果がゼロになる
+            if (forwardLengthSq <= 0.000001f)
+            {
+                // この場合はカメラの上方向を画面上方向として使用する
+                cameraForward = _movementCamera.transform.up;
+                cameraForward.y = 0.0f;
+
+                forwardLengthSq =
+                    cameraForward.x * cameraForward.x +
+                    cameraForward.z * cameraForward.z;
+            }
+
+            if (forwardLengthSq <= 0.000001f)
+            {
+                return new Vector3(0.0f, 0.0f, 1.0f);
+            }
+
+            float inverseLength =
+                1.0f / (float)Math.Sqrt(forwardLengthSq);
+
+            return new Vector3(
+                cameraForward.x * inverseLength,
+                0.0f,
+                cameraForward.z * inverseLength);
+        }
+
+        /// <summary>
+        /// Command一覧から移動入力を取得する。
+        /// </summary>
+        private Vector2 FindMoveDirection(CharacterContext context)
+        {
             var commands = context.Commands;
+
             for (int i = 0; i < commands.Count; i++)
             {
                 if (commands[i] is MoveCommand moveCommand)
                 {
-                    direction = moveCommand.Direction;
-                    break;
+                    return moveCommand.Direction;
                 }
             }
 
-            Vector3 velocity = new Vector3(direction.x, 0f, direction.y) * context.MoveSpeed;
-            velocity.y = context.Rigidbody.linearVelocity.y;
-            context.Rigidbody.linearVelocity = velocity;
-
-            ApplyMotion(direction);
+            return Vector2.zero;
         }
 
         /// <summary>
-        /// 移動に応じたモーション反映の例。DriverはOwner経由でAnimator等の追加情報を
-        /// 自由に持って良い、という方針のサンプル。実際のパラメータ名・仕様に合わせて調整する。
+        /// 通常移動時に、入力方向へ体を回転させる。
         /// </summary>
-        private void ApplyMotion(Vector2 direction)
+        private void RotateToInputDirection(
+            Vector2 inputDirection,
+            float deltaTime)
+        {
+            float lengthSq =
+                inputDirection.x * inputDirection.x +
+                inputDirection.y * inputDirection.y;
+
+            if (lengthSq <= 0.000001f)
+            {
+                return;
+            }
+
+            float inverseLength = 1.0f / (float)Math.Sqrt(lengthSq);
+
+            Vector3 worldDirection = new Vector3(
+                inputDirection.x * inverseLength,
+                0.0f,
+                inputDirection.y * inverseLength);
+
+            RotateToWorldDirection(
+                worldDirection,
+                RotationSharpness,
+                deltaTime);
+        }
+
+        /// <summary>
+        /// 指定されたワールド方向へ体を回転させる。
+        /// </summary>
+        private void RotateToWorldDirection(
+            Vector3 worldDirection,
+            float rotationSharpness,
+            float deltaTime)
+        {
+            float directionLengthSq =
+                worldDirection.x * worldDirection.x +
+                worldDirection.z * worldDirection.z;
+
+            if (directionLengthSq <= 0.000001f)
+            {
+                return;
+            }
+
+            float targetYawRadians = (float)Math.Atan2(
+                worldDirection.x,
+                worldDirection.z);
+
+            float targetYawDegrees = targetYawRadians * Rad2Deg;
+
+            Quaternion currentRotation = Owner.transform.rotation;
+            Quaternion targetRotation = MakeEuler(
+                0.0f,
+                targetYawDegrees,
+                0.0f);
+
+            // フレームレートに依存しにくい補間率を計算する
+            float interpolationRate =
+                1.0f -
+                (float)Math.Exp(-rotationSharpness * deltaTime);
+
+            Owner.transform.rotation = Nlerp(
+                currentRotation,
+                targetRotation,
+                interpolationRate);
+        }
+
+        /// <summary>
+        /// 通常時に現在向いている前方向へ進む。
+        /// </summary>
+        private void MoveForward(
+            float inputMagnitude,
+            float deltaTime)
+        {
+            float moveDistance =
+                Owner.MoveSpeed *
+                inputMagnitude *
+                deltaTime;
+
+            Owner.transform.position +=
+                Owner.transform.forward * moveDistance;
+        }
+
+        /// <summary>
+        /// ロックオン対象を基準に移動する。
+        ///
+        /// input.y:
+        ///   正数なら対象へ接近
+        ///   負数なら対象から後退
+        ///
+        /// input.x:
+        ///   正数なら右移動
+        ///   負数なら左移動
+        /// </summary>
+        private void MoveAroundLockOnTarget(
+     Vector2 inputDirection,
+     float inputMagnitude,
+     float deltaTime)
+        {
+            Vector3 cameraForward = GetCameraForwardOnXZ();
+
+            // カメラ前方向に対して直角となる右方向を作る
+            Vector3 cameraRight = new Vector3(
+                cameraForward.z,
+                0.0f,
+                -cameraForward.x);
+
+            // 画面基準で移動方向を作る
+            Vector3 moveDirection =
+                cameraRight * inputDirection.x +
+                cameraForward * inputDirection.y;
+
+            float moveLengthSq =
+                moveDirection.x * moveDirection.x +
+                moveDirection.z * moveDirection.z;
+
+            if (moveLengthSq <= 0.000001f)
+            {
+                return;
+            }
+
+            float inverseMoveLength =
+                1.0f / (float)Math.Sqrt(moveLengthSq);
+
+            moveDirection.x *= inverseMoveLength;
+            moveDirection.y = 0.0f;
+            moveDirection.z *= inverseMoveLength;
+
+            float moveDistance =
+                Owner.MoveSpeed *
+                inputMagnitude *
+                deltaTime;
+
+            Owner.transform.position +=
+                moveDirection * moveDistance;
+        }
+
+        /// <summary>
+        /// XZ平面上のベクトルを正規化する。
+        /// </summary>
+        private static Vector3 NormalizeXZ(Vector3 value)
+        {
+            float lengthSq =
+                value.x * value.x +
+                value.z * value.z;
+
+            if (lengthSq <= 0.000001f)
+            {
+                return new Vector3(0.0f, 0.0f, 1.0f);
+            }
+
+            float inverseLength =
+                1.0f / (float)Math.Sqrt(lengthSq);
+
+            return new Vector3(
+                value.x * inverseLength,
+                0.0f,
+                value.z * inverseLength);
+        }
+
+        /// <summary>
+        /// 移動入力をAnimatorへ反映する。
+        /// </summary>
+        private void ApplyMotion(
+            Vector2 inputDirection,
+            float speedRate,
+            bool isLockOn)
         {
             if (!_animatorResolved)
             {
@@ -48,9 +361,144 @@ namespace Game.CharacterInput
                 _animatorResolved = true;
             }
 
-            if (_animator == null) return;
+            if (_animator == null)
+            {
+                return;
+            }
 
-            _animator.SetFloat("Speed", direction.magnitude);
+            _animator.SetFloat("Speed", speedRate);
+            _animator.SetBool("IsLockOn", isLockOn);
+
+            // ロックオン移動用。
+            // Animatorにパラメータがある場合は前後・左右移動へ利用できる。
+            _animator.SetFloat("MoveX", inputDirection.x);
+            _animator.SetFloat("MoveY", inputDirection.y);
         }
+
+        /// <summary>
+        /// オイラー角からQuaternionを生成する。
+        /// 角度の単位は度数法。
+        /// </summary>
+        private static Quaternion MakeEuler(
+            float xDegrees,
+            float yDegrees,
+            float zDegrees)
+        {
+            float halfX = xDegrees * Deg2Rad * 0.5f;
+            float halfY = yDegrees * Deg2Rad * 0.5f;
+            float halfZ = zDegrees * Deg2Rad * 0.5f;
+
+            float sinX = (float)Math.Sin(halfX);
+            float cosX = (float)Math.Cos(halfX);
+
+            float sinY = (float)Math.Sin(halfY);
+            float cosY = (float)Math.Cos(halfY);
+
+            float sinZ = (float)Math.Sin(halfZ);
+            float cosZ = (float)Math.Cos(halfZ);
+
+            Quaternion result = new Quaternion
+            {
+                x = sinX * cosY * cosZ - cosX * sinY * sinZ,
+                y = cosX * sinY * cosZ + sinX * cosY * sinZ,
+                z = cosX * cosY * sinZ - sinX * sinY * cosZ,
+                w = cosX * cosY * cosZ + sinX * sinY * sinZ
+            };
+
+            return Normalize(result);
+        }
+
+        /// <summary>
+        /// Quaternionを線形補間してから正規化する。
+        /// 常に短い回転経路を選択する。
+        /// </summary>
+        private static Quaternion Nlerp(
+            Quaternion from,
+            Quaternion to,
+            float interpolationRate)
+        {
+            float t = Clamp01(interpolationRate);
+
+            float dot =
+                from.x * to.x +
+                from.y * to.y +
+                from.z * to.z +
+                from.w * to.w;
+
+            // qと-qは同じ回転を表すため、
+            // 内積が負なら符号を反転する
+            if (dot < 0.0f)
+            {
+                to.x = -to.x;
+                to.y = -to.y;
+                to.z = -to.z;
+                to.w = -to.w;
+            }
+
+            Quaternion result = new Quaternion
+            {
+                x = from.x + (to.x - from.x) * t,
+                y = from.y + (to.y - from.y) * t,
+                z = from.z + (to.z - from.z) * t,
+                w = from.w + (to.w - from.w) * t
+            };
+
+            return Normalize(result);
+        }
+
+        /// <summary>
+        /// Quaternionの長さを1へ正規化する。
+        /// </summary>
+        private static Quaternion Normalize(Quaternion quaternion)
+        {
+            float squareLength =
+                quaternion.x * quaternion.x +
+                quaternion.y * quaternion.y +
+                quaternion.z * quaternion.z +
+                quaternion.w * quaternion.w;
+
+            if (squareLength <= 0.000001f)
+            {
+                return new Quaternion(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f);
+            }
+
+            float inverseLength =
+                1.0f / (float)Math.Sqrt(squareLength);
+
+            quaternion.x *= inverseLength;
+            quaternion.y *= inverseLength;
+            quaternion.z *= inverseLength;
+            quaternion.w *= inverseLength;
+
+            return quaternion;
+        }
+
+        /// <summary>
+        /// 値を0～1へ制限する。
+        /// </summary>
+        private static float Clamp01(float value)
+        {
+            if (value < 0.0f)
+            {
+                return 0.0f;
+            }
+
+            if (value > 1.0f)
+            {
+                return 1.0f;
+            }
+
+            return value;
+        }
+
+        private const float Deg2Rad =
+            (float)(Math.PI / 180.0);
+
+        private const float Rad2Deg =
+            (float)(180.0 / Math.PI);
     }
 }
