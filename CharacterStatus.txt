@@ -1,0 +1,188 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// キャラクターの状態を表すビットフラグ。複数の状態を同時に持てる。
+    /// 増やす場合はここに 1 &lt;&lt; n の形で追加していく(最大32個)。
+    /// </summary>
+    [Flags]
+    public enum StatusFlag
+    {
+        None   = 0,
+        Move   = 1 << 0,
+        Attack = 1 << 1,
+        Dead   = 1 << 2,
+        Heal   = 1 << 3,
+        Guard  = 1 << 4,
+        // 例: Stun = 1 << 5, ...
+    }
+
+    /// <summary>状態に入った(Enter)か、抜けた(Exit)かを表す。</summary>
+    public enum StatusEventType
+    {
+        Enter,
+        Exit,
+    }
+
+    /// <summary>
+    /// 「ビットが変化した」という通知だけを持つ軽量データ。
+    /// 実際のコールバック呼び出しはTick()の中でメインスレッドから行う。
+    /// </summary>
+    internal readonly struct StatusEvent
+    {
+        public readonly StatusFlag Bit;
+        public readonly StatusEventType Type;
+
+        public StatusEvent(StatusFlag bit, StatusEventType type)
+        {
+            Bit = bit;
+            Type = type;
+        }
+    }
+
+    /// <summary>
+    /// キャラクターの状態(ビットテーブル)を管理するクラス。
+    /// CharacterMotorの肥大化を避けるため、状態管理はここに切り出してある。
+    ///
+    /// - AddStatus / SubStatus : 明示的にOFFにするまで維持される状態
+    /// - TryStatus             : 呼ばれたフレームだけON。毎フレームUpdateから呼び続ければ立ちっぱなしになる
+    ///
+    /// AddStatus/SubStatus/TryStatusはどのスレッドから呼ばれても良いように、
+    /// 実際のビット変更はキューに貯めておき、Tick()(メインスレッドのUpdateから呼ぶ想定)でまとめて反映する。
+    /// ビットが変化したときのイベントも即座には発火せず、検出したフレームではキューに積むだけにして、
+    /// 実際のコールバック呼び出しは次のTick()の冒頭(=次フレームのUpdate)で行う。
+    /// これにより、マルチスレッドから状態を変更しても、コールバックは必ずメインスレッドの
+    /// 決まったタイミングでしか呼ばれないので安全になる。
+    /// </summary>
+    public class CharacterStatus
+    {
+        private StatusFlag _currentFlags;
+        private StatusFlag _momentaryFlagsApplied; // 直近のTick()で反映されているTryStatus分
+
+        private readonly ConcurrentQueue<(StatusFlag bit, bool isAdd)> _pendingChanges = new ConcurrentQueue<(StatusFlag, bool)>();
+        private readonly ConcurrentQueue<StatusFlag> _momentaryRequests = new ConcurrentQueue<StatusFlag>();
+        private readonly ConcurrentQueue<StatusEvent> _pendingEvents = new ConcurrentQueue<StatusEvent>();
+
+        private readonly Dictionary<StatusFlag, Action> _enterCallbacks = new Dictionary<StatusFlag, Action>();
+        private readonly Dictionary<StatusFlag, Action> _exitCallbacks = new Dictionary<StatusFlag, Action>();
+
+        /// <summary>現在確定している状態(メインスレッドのTick()内でのみ更新される)。</summary>
+        public StatusFlag CurrentFlags => _currentFlags;
+
+        /// <summary>指定ビットが立っているかどうか。</summary>
+        public bool Has(StatusFlag bit) => (_currentFlags & bit) != 0;
+
+        /// <summary>
+        /// 明示的にSubStatusするまで維持される状態を立てる。どのスレッドからでも呼び出し可能。
+        /// </summary>
+        public void AddStatus(StatusFlag bit)
+        {
+            _pendingChanges.Enqueue((bit, true));
+        }
+
+        /// <summary>
+        /// AddStatusで立てた状態を降ろす。どのスレッドからでも呼び出し可能。
+        /// </summary>
+        public void SubStatus(StatusFlag bit)
+        {
+            _pendingChanges.Enqueue((bit, false));
+        }
+
+        /// <summary>
+        /// 呼ばれたフレームだけ状態を立てる(瞬間フラグ)。
+        /// 毎フレームUpdateから呼び続ければ、その間ずっと立った状態になる。
+        /// どのスレッドからでも呼び出し可能。
+        /// </summary>
+        public void TryStatus(StatusFlag bit)
+        {
+            _momentaryRequests.Enqueue(bit);
+        }
+
+        /// <summary>
+        /// 指定ビットがEnter(立った瞬間)したときのコールバックを登録する。
+        /// </summary>
+        public void RegisterEntryEvent(StatusFlag bit, Action callback)
+        {
+            if (callback == null) return;
+            _enterCallbacks[bit] = _enterCallbacks.TryGetValue(bit, out var existing) ? existing + callback : callback;
+        }
+
+        /// <summary>
+        /// 指定ビットがExit(抜けた瞬間)したときのコールバックを登録する。
+        /// </summary>
+        public void RegisterExitEvent(StatusFlag bit, Action callback)
+        {
+            if (callback == null) return;
+            _exitCallbacks[bit] = _exitCallbacks.TryGetValue(bit, out var existing) ? existing + callback : callback;
+        }
+
+        /// <summary>RegisterEntryEventの解除。</summary>
+        public void UnregisterEntryEvent(StatusFlag bit, Action callback)
+        {
+            if (callback == null || !_enterCallbacks.ContainsKey(bit)) return;
+            _enterCallbacks[bit] -= callback;
+        }
+
+        /// <summary>RegisterExitEventの解除。</summary>
+        public void UnregisterExitEvent(StatusFlag bit, Action callback)
+        {
+            if (callback == null || !_exitCallbacks.ContainsKey(bit)) return;
+            _exitCallbacks[bit] -= callback;
+        }
+
+        /// <summary>
+        /// メインスレッドのUpdate等から毎フレーム呼ぶ。
+        /// 1: 前フレームで検出され溜まっていたイベントをここで発火(1フレーム遅延)。
+        /// 2: AddStatus/SubStatus/TryStatusのリクエストを反映して状態を確定させる。
+        /// 3: 変化したビットを検出し、次回のTick()冒頭で発火するようイベントをキューへ積む。
+        /// </summary>
+        public void Tick()
+        {
+            while (_pendingEvents.TryDequeue(out StatusEvent evt))
+            {
+                Dispatch(evt);
+            }
+
+            StatusFlag previous = _currentFlags;
+
+            while (_pendingChanges.TryDequeue(out var change))
+            {
+                _currentFlags = change.isAdd ? (_currentFlags | change.bit) : (_currentFlags & ~change.bit);
+            }
+
+            StatusFlag requestedThisFrame = StatusFlag.None;
+            while (_momentaryRequests.TryDequeue(out StatusFlag bit))
+            {
+                requestedThisFrame |= bit;
+            }
+
+            _currentFlags &= ~_momentaryFlagsApplied;
+            _currentFlags |= requestedThisFrame;
+            _momentaryFlagsApplied = requestedThisFrame;
+
+            StatusFlag changed = previous ^ _currentFlags;
+            if (changed == StatusFlag.None) return;
+
+            for (int i = 0; i < 32; i++)
+            {
+                StatusFlag bit = (StatusFlag)(1 << i);
+                if ((changed & bit) == 0) continue;
+
+                bool enteredNow = (_currentFlags & bit) != 0;
+                _pendingEvents.Enqueue(new StatusEvent(bit, enteredNow ? StatusEventType.Enter : StatusEventType.Exit));
+            }
+        }
+
+        private void Dispatch(StatusEvent evt)
+        {
+            var table = evt.Type == StatusEventType.Enter ? _enterCallbacks : _exitCallbacks;
+            if (table.TryGetValue(evt.Bit, out Action action))
+            {
+                action?.Invoke();
+            }
+        }
+    }
+}

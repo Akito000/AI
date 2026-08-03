@@ -1,0 +1,51 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// キャラクターへの入力の「意図」を表すだけのマーカー。
+    /// 実際にどう処理するかは各Driver(MoveDriver等)が判断する。
+    /// </summary>
+    public interface ICommand
+    {
+    }
+
+    /// <summary>指定した方向へ移動したいという意図。</summary>
+    public class MoveCommand : ICommand
+    {
+        public Vector2 Direction { get; }
+
+        public MoveCommand(Vector2 direction)
+        {
+            Direction = direction;
+        }
+    }
+
+    /// <summary>移動入力なし、という意図。毎回newしなくて済むようにシングルトン化。</summary>
+    public class IdleCommand : ICommand
+    {
+        public static readonly IdleCommand Instance = new IdleCommand();
+        private IdleCommand() { }
+    }
+
+    /// <summary>
+    /// 特殊アクション(マウス左クリック / ゲームパッドYボタン)を使いたいという意図。
+    /// 役割(Attacker/Tank/Healer)によって、これを見て何をするかが変わる
+    /// (AttackDriver/TankDriver/HealDriverがそれぞれ自分の役割の時だけ反応する)。
+    /// </summary>
+    public class SpecialActionCommand : ICommand
+    {
+        public static readonly SpecialActionCommand Instance = new SpecialActionCommand();
+        private SpecialActionCommand() { }
+    }
+
+    /// <summary>
+    /// 役割変え(スペースキー / ゲームパッドAボタン)をしたいという意図。
+    /// RoleDriverが検知し、Attacker→Tank→Healer→Attacker...の順で役割を1つ進める。
+    /// </summary>
+    public class RoleChangeCommand : ICommand
+    {
+        public static readonly RoleChangeCommand Instance = new RoleChangeCommand();
+        private RoleChangeCommand() { }
+    }
+}

@@ -1,0 +1,56 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 移動を担当する最小単位のDriver。MoveCommand/IdleCommandを見て、
+    /// 俯瞰視点前提でXZ平面上をRigidbodyで移動させる。
+    /// あわせて、モーション(Animator)への反映例も持たせてある
+    /// (Ownerにアニメーターが無いキャラクターでは何もしない安全な作り)。
+    /// </summary>
+    public class MoveDriver : CharacterDriverBase
+    {
+        public override int Priority => 100;
+
+        private Animator _animator;
+        private bool _animatorResolved;
+
+        public override void Execute(CharacterContext context)
+        {
+            Vector2 direction = Vector2.zero;
+
+            var commands = context.Commands;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is MoveCommand moveCommand)
+                {
+                    direction = moveCommand.Direction;
+                    break;
+                }
+            }
+
+            Vector3 velocity = new Vector3(direction.x, 0f, direction.y) * context.MoveSpeed;
+            velocity.y = context.Rigidbody.linearVelocity.y;
+            context.Rigidbody.linearVelocity = velocity;
+
+            ApplyMotion(direction);
+        }
+
+        /// <summary>
+        /// 移動に応じたモーション反映の例。DriverはOwner経由でAnimator等の追加情報を
+        /// 自由に持って良い、という方針のサンプル。実際のパラメータ名・仕様に合わせて調整する。
+        /// </summary>
+        private void ApplyMotion(Vector2 direction)
+        {
+            if (!_animatorResolved)
+            {
+                _animator = Owner.GetComponent<Animator>();
+                _animatorResolved = true;
+            }
+
+            if (_animator == null) return;
+
+            _animator.SetFloat("Speed", direction.magnitude);
+        }
+    }
+}

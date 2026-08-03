@@ -1,0 +1,43 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// ヒーラー役職の挙動を担当する最小単位のDriver。
+    /// 自分の役割がHealerの時だけ、SpecialActionCommandを検知して回復を行う。
+    /// 対象選定システムがまだ無いので、今は自分自身を回復するプレースホルダー。
+    /// </summary>
+    public class HealDriver : CharacterDriverBase
+    {
+        public override int Priority => 150;
+
+        private const float HealAmount = 15f;
+
+        public override void Execute(CharacterContext context)
+        {
+            if (!context.RoleStatus.Has(RoleFlag.Healer)) return;
+
+            var commands = context.Commands;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is SpecialActionCommand)
+                {
+                    PerformHeal(context);
+                    break;
+                }
+            }
+        }
+
+        private void PerformHeal(CharacterContext context)
+        {
+            context.Status.TryStatus(StatusFlag.Heal);
+
+            var damageDriver = Owner.GetDriver<DamageDriver>();
+            if (damageDriver != null)
+            {
+                damageDriver.Heal(HealAmount);
+                Debug.Log($"[HealDriver] {Owner.name}: 自身を{HealAmount}回復(対象選定は今後追加)");
+            }
+        }
+    }
+}

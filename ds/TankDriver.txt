@@ -1,0 +1,35 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// タンク役職の挙動を担当する最小単位のDriver。
+    /// 自分の役割がTankの時だけ、SpecialActionCommandを検知して挑発等の行動を行う(プレースホルダー)。
+    /// 実際の効果(範囲挑発・被ダメージ軽減等)は今後追加する。
+    /// </summary>
+    public class TankDriver : CharacterDriverBase
+    {
+        public override int Priority => 150;
+
+        public override void Execute(CharacterContext context)
+        {
+            if (!context.RoleStatus.Has(RoleFlag.Tank)) return;
+
+            var commands = context.Commands;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is SpecialActionCommand)
+                {
+                    PerformTaunt(context);
+                    break;
+                }
+            }
+        }
+
+        private void PerformTaunt(CharacterContext context)
+        {
+            context.Status.TryStatus(StatusFlag.Guard);
+            Debug.Log($"[TankDriver] {Owner.name}: 挑発(プレースホルダー)");
+        }
+    }
+}

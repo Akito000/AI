@@ -1,0 +1,64 @@
+using System.Collections.Concurrent;
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// ダメージ・回復(HP)を担当する最小単位のDriver。
+    /// TakeDamage/HealはどのスレッドからでもOKなようにキューへ積むだけにし、
+    /// 実際のHP反映・Dead状態への遷移はExecute(メインスレッド)側でのみ行う。
+    /// </summary>
+    public class DamageDriver : CharacterDriverBase
+    {
+        public override int Priority => 200;
+
+        private readonly float _maxHp;
+        private float _currentHp;
+        private readonly ConcurrentQueue<float> _pendingDamage = new ConcurrentQueue<float>();
+        private readonly ConcurrentQueue<float> _pendingHeal = new ConcurrentQueue<float>();
+
+        public float CurrentHp => _currentHp;
+        public float MaxHp => _maxHp;
+
+        public DamageDriver(float maxHp = 100f)
+        {
+            _maxHp = maxHp;
+            _currentHp = maxHp;
+        }
+
+        /// <summary>ダメージ適用をリクエストする。どのスレッドからでも呼び出し可能。</summary>
+        public void TakeDamage(float amount)
+        {
+            if (amount <= 0f) return;
+            _pendingDamage.Enqueue(amount);
+        }
+
+        /// <summary>回復適用をリクエストする。どのスレッドからでも呼び出し可能。</summary>
+        public void Heal(float amount)
+        {
+            if (amount <= 0f) return;
+            _pendingHeal.Enqueue(amount);
+        }
+
+        public override void Execute(CharacterContext context)
+        {
+            bool damaged = false;
+
+            while (_pendingDamage.TryDequeue(out float amount))
+            {
+                _currentHp = Mathf.Max(0f, _currentHp - amount);
+                damaged = true;
+            }
+
+            while (_pendingHeal.TryDequeue(out float amount))
+            {
+                _currentHp = Mathf.Min(_maxHp, _currentHp + amount);
+            }
+
+            if (damaged && _currentHp <= 0f)
+            {
+                context.Status.AddStatus(StatusFlag.Dead);
+            }
+        }
+    }
+}

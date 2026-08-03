@@ -1,0 +1,36 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 各Driverが共有して読み書きするキャラクターの実行時コンテキスト。
+    /// Transform/Rigidbody/Status(状態)/RoleStatus(役割)/このフレームのコマンド等をまとめて持つ。
+    /// Driverはこれを見て、必要な処理だけを行う。
+    /// </summary>
+    public class CharacterContext
+    {
+        public Transform Transform { get; }
+        public Rigidbody Rigidbody { get; }
+
+        /// <summary>Move/Attack/Dead等、キャラクターの状態(ビットテーブル)。</summary>
+        public CharacterStatus Status { get; }
+
+        /// <summary>Attacker/Tank/Healer等、キャラクターの役割(ビットテーブル、CharacterStatusとは別のulong管理)。</summary>
+        public RoleStatus RoleStatus { get; }
+
+        public float MoveSpeed { get; set; }
+
+        /// <summary>このフレームでIInputSourceから得られたコマンド一覧。CharacterUpdaterがUpdateの最初に設定する。</summary>
+        public IReadOnlyList<ICommand> Commands { get; internal set; } = System.Array.Empty<ICommand>();
+
+        public CharacterContext(Transform transform, Rigidbody rigidbody, float moveSpeed)
+        {
+            Transform = transform;
+            Rigidbody = rigidbody;
+            MoveSpeed = moveSpeed;
+            Status = new CharacterStatus();
+            RoleStatus = new RoleStatus();
+        }
+    }
+}

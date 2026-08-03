@@ -1,0 +1,191 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 「毎フレームどんなコマンドを出すか」を決めるだけの役割。
+    /// 1フレームで複数コマンド(移動+特殊アクション等)を同時に出せるようにリストで返す。
+    /// Player用(キーボード/ゲームパッド)もNPC用も、このinterfaceさえ実装すれば
+    /// CharacterUpdater / Driver側は一切区別しなくてよい。
+    /// </summary>
+    public interface IInputSource
+    {
+        IReadOnlyList<ICommand> GetCommands();
+    }
+
+    /// <summary>
+    /// キーボード+マウス入力からコマンドを生成する。動作確認・デバッグ用途。
+    /// 移動:WASD/矢印キー, 特殊アクション:マウス左クリック, 役割変え:スペースキー。
+    /// </summary>
+    public class KeyboardInputSource : IInputSource
+    {
+        private readonly List<ICommand> _commands = new List<ICommand>(4);
+
+        public IReadOnlyList<ICommand> GetCommands()
+        {
+            _commands.Clear();
+
+            var keyboard = Keyboard.current;
+            var mouse = Mouse.current;
+
+            if (keyboard != null)
+            {
+                Vector2 direction = Vector2.zero;
+
+                if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) direction.y += 1f;
+                if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) direction.y -= 1f;
+                if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) direction.x -= 1f;
+                if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) direction.x += 1f;
+
+                _commands.Add(direction.sqrMagnitude > 0.0001f
+                    ? new MoveCommand(direction.normalized)
+                    : IdleCommand.Instance);
+
+                if (keyboard.spaceKey.wasPressedThisFrame)
+                {
+                    _commands.Add(RoleChangeCommand.Instance);
+                }
+            }
+            else
+            {
+                _commands.Add(IdleCommand.Instance);
+            }
+
+            if (mouse != null && mouse.leftButton.wasPressedThisFrame)
+            {
+                _commands.Add(SpecialActionCommand.Instance);
+            }
+
+            return _commands;
+        }
+    }
+
+    /// <summary>
+    /// 特定のゲームパッドの入力からコマンドを生成する。
+    /// 移動:左スティック, 特殊アクション:Yボタン(buttonNorth), 役割変え:Aボタン(buttonSouth)。
+    /// どのGamepadを使うかは、インデックス指定 or Gamepad参照の直接指定のどちらでも可能。
+    /// </summary>
+    public class GamepadInputSource : IInputSource
+    {
+        private readonly Gamepad _gamepad;
+        private const float DeadZone = 0.15f;
+        private readonly List<ICommand> _commands = new List<ICommand>(4);
+
+        public GamepadInputSource(int gamepadIndex)
+        {
+            var all = Gamepad.all;
+            _gamepad = (gamepadIndex >= 0 && gamepadIndex < all.Count) ? all[gamepadIndex] : null;
+        }
+
+        public GamepadInputSource(Gamepad gamepad)
+        {
+            _gamepad = gamepad;
+        }
+
+        public IReadOnlyList<ICommand> GetCommands()
+        {
+            _commands.Clear();
+
+            if (_gamepad == null)
+            {
+                _commands.Add(IdleCommand.Instance);
+                return _commands;
+            }
+
+            Vector2 stick = _gamepad.leftStick.ReadValue();
+            _commands.Add(stick.sqrMagnitude > DeadZone * DeadZone
+                ? new MoveCommand(stick)
+                : IdleCommand.Instance);
+
+            if (_gamepad.buttonNorth.wasPressedThisFrame) // Yボタン
+            {
+                _commands.Add(SpecialActionCommand.Instance);
+            }
+
+            if (_gamepad.buttonSouth.wasPressedThisFrame) // Aボタン
+            {
+                _commands.Add(RoleChangeCommand.Instance);
+            }
+
+            return _commands;
+        }
+    }
+
+    /// <summary>
+    /// NPC用の入力ソース(プレースホルダー)。
+    /// 移動・特殊アクション・役割変えそれぞれの「思考」をprotected virtualメソッドに分離してあるので、
+    /// 継承先でDecideXxxをオーバーライドすれば本物のAIロジックに差し替えられる。
+    /// 現状はランダム/一定間隔での仮実装。
+    /// </summary>
+    public class NpcInputSource : IInputSource
+    {
+        private const float MoveChangeIntervalSeconds = 2f;
+        private const float SpecialActionCheckIntervalSeconds = 3f;
+        private const float RoleChangeCheckIntervalSeconds = 5f;
+        private const float SpecialActionChance = 0.2f;
+        private const float RoleChangeChance = 0.1f;
+
+        private Vector2 _currentDirection;
+        private float _nextMoveChangeTime;
+        private float _nextSpecialActionCheckTime;
+        private float _nextRoleChangeCheckTime;
+
+        private readonly List<ICommand> _commands = new List<ICommand>(4);
+
+        public IReadOnlyList<ICommand> GetCommands()
+        {
+            _commands.Clear();
+
+            _commands.Add(DecideMove());
+
+            ICommand special = DecideSpecialAction();
+            if (special != null) _commands.Add(special);
+
+            ICommand roleChange = DecideRoleChange();
+            if (roleChange != null) _commands.Add(roleChange);
+
+            return _commands;
+        }
+
+        /// <summary>
+        /// NPCの移動方向の思考。現状は一定間隔でランダムな方向を選ぶだけの仮実装。
+        /// 追跡・逃走・巡回等の実際のAIロジックはここを差し替えて実装する。
+        /// </summary>
+        protected virtual ICommand DecideMove()
+        {
+            if (Time.time >= _nextMoveChangeTime)
+            {
+                _currentDirection = Random.insideUnitCircle.normalized;
+                _nextMoveChangeTime = Time.time + MoveChangeIntervalSeconds;
+            }
+
+            return new MoveCommand(_currentDirection);
+        }
+
+        /// <summary>
+        /// NPCが特殊アクションを使うかどうかの思考。現状は一定間隔で低確率発動の仮実装。
+        /// コマンドを出さない場合はnullを返す。
+        /// </summary>
+        protected virtual ICommand DecideSpecialAction()
+        {
+            if (Time.time < _nextSpecialActionCheckTime) return null;
+            _nextSpecialActionCheckTime = Time.time + SpecialActionCheckIntervalSeconds;
+
+            return Random.value < SpecialActionChance ? SpecialActionCommand.Instance : null;
+        }
+
+        /// <summary>
+        /// NPCが役割変えを要求するかどうかの思考。現状は一定間隔で低確率発動の仮実装。
+        /// コマンドを出さない場合はnullを返す。
+        /// </summary>
+        protected virtual ICommand DecideRoleChange()
+        {
+            if (Time.time < _nextRoleChangeCheckTime) return null;
+            _nextRoleChangeCheckTime = Time.time + RoleChangeCheckIntervalSeconds;
+
+            return Random.value < RoleChangeChance ? RoleChangeCommand.Instance : null;
+        }
+    }
+}

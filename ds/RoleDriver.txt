@@ -1,0 +1,48 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 役割(ロール)の切り替えを担当する最小単位のDriver。
+    /// RoleChangeCommandを検知すると、Attacker→Tank→Healer→Attacker...の順で役割を1つ進める。
+    /// 実際にどの役割かはcontext.RoleStatusのビットで管理し、
+    /// AttackDriver/TankDriver/HealDriverが「自分の役割の時だけ」SpecialActionCommandに反応する形で連動する。
+    /// </summary>
+    public class RoleDriver : CharacterDriverBase
+    {
+        public override int Priority => 300;
+
+        private static readonly RoleFlag[] RoleOrder = { RoleFlag.Attacker, RoleFlag.Tank, RoleFlag.Healer };
+
+        private int _currentIndex = -1;
+
+        public override void Execute(CharacterContext context)
+        {
+            if (_currentIndex < 0)
+            {
+                // 初回起動時: 先頭の役割(Attacker)から開始する
+                _currentIndex = 0;
+                context.RoleStatus.AddStatus(RoleOrder[_currentIndex]);
+            }
+
+            var commands = context.Commands;
+            bool roleChangeRequested = false;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is RoleChangeCommand)
+                {
+                    roleChangeRequested = true;
+                    break;
+                }
+            }
+
+            if (!roleChangeRequested) return;
+
+            context.RoleStatus.SubStatus(RoleOrder[_currentIndex]);
+            _currentIndex = (_currentIndex + 1) % RoleOrder.Length;
+            context.RoleStatus.AddStatus(RoleOrder[_currentIndex]);
+
+            Debug.Log($"[RoleDriver] {Owner.name}: 役割変更 → {RoleOrder[_currentIndex]}");
+        }
+    }
+}

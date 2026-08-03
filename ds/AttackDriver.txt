@@ -1,0 +1,37 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// アタッカー役職の挙動を担当する最小単位のDriver。
+    /// 自分の役割がAttackerの時だけ、SpecialActionCommandを検知して攻撃を行う。
+    /// 対象選定(誰を攻撃するか)は今後のターゲティングシステム側の役割。今はプレースホルダーとしてログのみ。
+    /// </summary>
+    public class AttackDriver : CharacterDriverBase
+    {
+        public override int Priority => 150;
+
+        public override void Execute(CharacterContext context)
+        {
+            if (!context.RoleStatus.Has(RoleFlag.Attacker)) return;
+
+            var commands = context.Commands;
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is SpecialActionCommand)
+                {
+                    PerformAttack(context);
+                    break;
+                }
+            }
+        }
+
+        private void PerformAttack(CharacterContext context)
+        {
+            context.Status.TryStatus(StatusFlag.Attack);
+            Debug.Log($"[AttackDriver] {Owner.name}: 攻撃(対象未選定のプレースホルダー)");
+            // 例: ターゲティングシステムができたら
+            // target.GetDriver<DamageDriver>()?.TakeDamage(damageAmount);
+        }
+    }
+}

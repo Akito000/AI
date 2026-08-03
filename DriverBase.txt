@@ -1,0 +1,35 @@
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 挙動を構成する最小単位の汎用基底クラス。継承して作る。
+    /// Ownerの型をジェネリックにすることで、将来キャラクター以外(発射物・設置物など)にも
+    /// 同じDriverの仕組み(優先度付き直列実行、Owner参照)を再利用できるようにしてある。
+    /// このクラス自体はCharacterUpdaterを一切知らない。
+    /// </summary>
+    public abstract class DriverBase<TOwner> where TOwner : class
+    {
+        /// <summary>
+        /// このDriverを保持しているOwner。登録されたタイミングで自動的にセットされる。
+        /// Owner経由で必要なコンポーネントや状態にアクセスする。
+        /// </summary>
+        public TOwner Owner { get; internal set; }
+
+        /// <summary>実行優先度。値が大きいほど先に実行される。継承先でoverrideして指定する。</summary>
+        public abstract int Priority { get; }
+
+        /// <summary>
+        /// 毎フレーム、Owner側のUpdateから呼ばれる想定(メインスレッド)。
+        /// 複数スレッドから状態を変更したい場合は、リクエストを内部キューに貯めておき、ここで反映すること。
+        /// </summary>
+        public abstract void Execute(CharacterContext context);
+    }
+
+    /// <summary>
+    /// キャラクター(CharacterUpdater)向けのDriver基底クラス。
+    /// MoveDriver・DamageDriver・RoleDriver等、このゲームのキャラクター系Driverはこれを継承する。
+    /// DriverBase&lt;CharacterUpdater&gt;の specialization で、書き味は今まで通り。
+    /// </summary>
+    public abstract class CharacterDriverBase : DriverBase<CharacterUpdater>
+    {
+    }
+}
