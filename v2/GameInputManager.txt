@@ -1,0 +1,50 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 接続されているコントローラーの数を見て、4人分のキャラクターに
+    /// 「プレイヤー(ゲームパッド)」か「NPC」の入力Driverを自動で割り振る。
+    /// オンラインではなく、ローカル接続のコントローラー数のみで判定し、常に4人になるようにする。
+    /// </summary>
+    public class GameInputManager : MonoBehaviour
+    {
+        [SerializeField] private CharacterUpdater[] characters = new CharacterUpdater[4];
+        [SerializeField] private bool autoAssignOnStart = true;
+
+        private void Start()
+        {
+            if (autoAssignOnStart)
+            {
+                AutoAssign();
+            }
+        }
+
+        /// <summary>
+        /// 接続コントローラー数に応じて、先頭からプレイヤー、残りをNPCに割り当てる。
+        /// </summary>
+        [ContextMenu("Auto Assign")]
+        public void AutoAssign()
+        {
+            var gamepads = Gamepad.all;
+            int playerCount = Mathf.Min(gamepads.Count, characters.Length);
+
+            for (int i = 0; i < characters.Length; i++)
+            {
+                if (characters[i] == null) continue;
+
+                if (i < playerCount)
+                {
+                    characters[i].SetInputDriver(new GamepadInputDriver(gamepads[i]), InputSourceType.Gamepad);
+                }
+                else
+                {
+                    characters[i].SetInputDriver(new NpcInputDriver(), InputSourceType.Npc);
+                }
+            }
+
+            Debug.Log($"[GameInputManager] 接続コントローラー数: {gamepads.Count} → プレイヤー{playerCount}人 / NPC{characters.Length - playerCount}人");
+        }
+    }
+}

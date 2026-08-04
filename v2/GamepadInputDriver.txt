@@ -1,0 +1,61 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// 特定のゲームパッドの入力からコマンドを生成し、context.Commandsにセットするドライバー。
+    /// Priorityを最大にしてあるので、必ず一番最初に実行される。
+    /// 移動:左スティック, 特殊アクション:Yボタン(buttonNorth), 役割変え:Aボタン(buttonSouth)。
+    /// どのGamepadを使うかは、インデックス指定 or Gamepad参照の直接指定のどちらでも可能。
+    /// </summary>
+    public class GamepadInputDriver : CharacterDriverBase
+    {
+        public override int Priority => 1000;
+
+        private readonly Gamepad _gamepad;
+        private const float DeadZone = 0.15f;
+        private readonly List<ICommand> _commands = new List<ICommand>(4);
+
+        public GamepadInputDriver(int gamepadIndex)
+        {
+            var all = Gamepad.all;
+            _gamepad = (gamepadIndex >= 0 && gamepadIndex < all.Count) ? all[gamepadIndex] : null;
+        }
+
+        public GamepadInputDriver(Gamepad gamepad)
+        {
+            _gamepad = gamepad;
+        }
+
+        public override void Execute(CharacterContext context)
+        {
+            _commands.Clear();
+
+            if (_gamepad == null)
+            {
+                _commands.Add(IdleCommand.Instance);
+                context.Commands = _commands;
+                return;
+            }
+
+            Vector2 stick = _gamepad.leftStick.ReadValue();
+            _commands.Add(stick.sqrMagnitude > DeadZone * DeadZone
+                ? new MoveCommand(stick)
+                : IdleCommand.Instance);
+
+            if (_gamepad.buttonNorth.wasPressedThisFrame) // Yボタン
+            {
+                _commands.Add(SpecialActionCommand.Instance);
+            }
+
+            if (_gamepad.buttonSouth.wasPressedThisFrame) // Aボタン
+            {
+                _commands.Add(RoleChangeCommand.Instance);
+            }
+
+            context.Commands = _commands;
+        }
+    }
+}

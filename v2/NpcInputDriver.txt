@@ -1,0 +1,83 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// NPC用の思考ドライバー(プレースホルダー)。移動・特殊アクション・役割変えの「思考」を
+    /// protected virtualメソッドに分離してあるので、継承先でDecideXxxをオーバーライドすれば
+    /// 本物のAIロジックに差し替えられる。
+    /// Priorityを最大にしてあるので、Keyboard/GamepadInputDriverと同様に必ず一番最初に実行される。
+    /// </summary>
+    public class NpcInputDriver : CharacterDriverBase
+    {
+        public override int Priority => 1000;
+
+        private const float MoveChangeIntervalSeconds = 2f;
+        private const float SpecialActionCheckIntervalSeconds = 3f;
+        private const float RoleChangeCheckIntervalSeconds = 5f;
+        private const float SpecialActionChance = 0.2f;
+        private const float RoleChangeChance = 0.1f;
+
+        private Vector2 _currentDirection;
+        private float _nextMoveChangeTime;
+        private float _nextSpecialActionCheckTime;
+        private float _nextRoleChangeCheckTime;
+
+        private readonly List<ICommand> _commands = new List<ICommand>(4);
+
+        public override void Execute(CharacterContext context)
+        {
+            _commands.Clear();
+
+            _commands.Add(DecideMove());
+
+            ICommand special = DecideSpecialAction();
+            if (special != null) _commands.Add(special);
+
+            ICommand roleChange = DecideRoleChange();
+            if (roleChange != null) _commands.Add(roleChange);
+
+            context.Commands = _commands;
+        }
+
+        /// <summary>
+        /// NPCの移動方向の思考。現状は一定間隔でランダムな方向を選ぶだけの仮実装。
+        /// 追跡・逃走・巡回等の実際のAIロジックはここを差し替えて実装する。
+        /// </summary>
+        protected virtual ICommand DecideMove()
+        {
+            if (Time.time >= _nextMoveChangeTime)
+            {
+                _currentDirection = Random.insideUnitCircle.normalized;
+                _nextMoveChangeTime = Time.time + MoveChangeIntervalSeconds;
+            }
+
+            return new MoveCommand(_currentDirection);
+        }
+
+        /// <summary>
+        /// NPCが特殊アクションを使うかどうかの思考。現状は一定間隔で低確率発動の仮実装。
+        /// コマンドを出さない場合はnullを返す。
+        /// </summary>
+        protected virtual ICommand DecideSpecialAction()
+        {
+            if (Time.time < _nextSpecialActionCheckTime) return null;
+            _nextSpecialActionCheckTime = Time.time + SpecialActionCheckIntervalSeconds;
+
+            return Random.value < SpecialActionChance ? SpecialActionCommand.Instance : null;
+        }
+
+        /// <summary>
+        /// NPCが役割変えを要求するかどうかの思考。現状は一定間隔で低確率発動の仮実装。
+        /// コマンドを出さない場合はnullを返す。
+        /// </summary>
+        protected virtual ICommand DecideRoleChange()
+        {
+            if (Time.time < _nextRoleChangeCheckTime) return null;
+            _nextRoleChangeCheckTime = Time.time + RoleChangeCheckIntervalSeconds;
+
+            return Random.value < RoleChangeChance ? RoleChangeCommand.Instance : null;
+        }
+    }
+}

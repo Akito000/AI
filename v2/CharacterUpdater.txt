@@ -1,0 +1,214 @@
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// このキャラクターの入力を「どこから受け取るか」を表す。
+    /// Inspectorから簡単に切り替えてテストできるようにするための列挙型。
+    /// </summary>
+    public enum InputSourceType
+    {
+        Npc,
+        Keyboard,
+        Gamepad,
+    }
+
+    /// <summary>
+    /// キャラクターの入力受付とDriver群の実行を統括するクラス。
+    /// CharacterMotorは廃止し、実際の挙動はMoveDriver/DamageDriverのような
+    /// 「最小単位のDriver(CharacterDriverBaseを継承したクラス)」に分割して持たせることで、この先も肥大化しないようにする。
+    /// 将来的なAttackerDriver/TankDriver/HealDriverなどの役職固有挙動も、
+    /// CharacterDriverBaseを継承したクラスをRegisterDriverするだけで追加できる想定。
+    ///
+    /// Driverは優先度の高い順に直列実行され、同優先度なら登録順(添え字)が大きい方が先に実行される。
+    /// Driverの登録・解除はどのスレッドからでも呼べるが、実際の反映・実行はUpdate(メインスレッド)でのみ行う。
+    /// </summary>
+    [RequireComponent(typeof(Rigidbody))]
+    public class CharacterUpdater : MonoBehaviour
+    {
+        [Header("入力切り替え(デバッグ・手動テスト用)")]
+        [SerializeField] private InputSourceType inputSourceType = InputSourceType.Npc;
+        [Tooltip("InputSourceTypeがGamepadの場合に使用する、Gamepad.allのインデックス")]
+        [SerializeField] private int gamepadIndex = 0;
+        [SerializeField] private float moveSpeed = 5f;
+        public float MoveSpeed => moveSpeed;
+
+        private CharacterContext _context;
+
+        private readonly List<DriverEntry> _drivers = new List<DriverEntry>();
+        private readonly ConcurrentQueue<DriverEntry> _pendingRegistrations = new ConcurrentQueue<DriverEntry>();
+        private readonly ConcurrentQueue<CharacterDriverBase> _pendingUnregistrations = new ConcurrentQueue<CharacterDriverBase>();
+        private int _nextRegistrationIndex;
+        private CharacterDriverBase _inputDriver;
+        public InputSourceType CurrentInputSourceType => inputSourceType;
+
+        /// <summary>このキャラクターの状態(ビットテーブル)。Move/Attack/Dead等をここで管理する。</summary>
+        public CharacterStatus Status => _context.Status;
+
+        /// <summary>このキャラクターの役割(ビットテーブル)。Attacker/Tank/Healer等をここで管理する。</summary>
+        public RoleStatus RoleStatus => _context.RoleStatus;
+
+        private readonly struct DriverEntry
+        {
+            public readonly CharacterDriverBase Driver;
+            public readonly int RegistrationIndex;
+
+            public DriverEntry(CharacterDriverBase driver, int registrationIndex)
+            {
+                Driver = driver;
+                RegistrationIndex = registrationIndex;
+            }
+        }
+
+        private void Awake()
+        {
+            var rigidbody = GetComponent<Rigidbody>();
+            rigidbody.freezeRotation = true; // Cubeが転がらないようにする
+            _context = new CharacterContext(transform, rigidbody, moveSpeed);
+
+            _inputDriver = CreateInputDriverFromInspector();
+            RegisterDriver(_inputDriver);
+        }
+
+        private void Start()
+        {
+            // ドライバー登録はここで行う想定。
+            // 今後、役職に応じてAttackerDriver/TankDriver/HealDriver等をここに追加していく。
+            RegisterDriver(new MoveDriver());
+            RegisterDriver(new DamageDriver());
+            RegisterDriver(new RoleDriver());
+            RegisterDriver(new AttackDriver());
+            RegisterDriver(new TankDriver());
+            RegisterDriver(new HealDriver());
+            ApplyPendingDriverChanges();
+
+        }
+
+        private void Update()
+        {
+            _context.Status.Tick();
+            _context.RoleStatus.Tick();
+          
+           
+
+            for (int i = 0; i < _drivers.Count; i++)
+            {
+                _drivers[i].Driver.Execute(_context);
+            }
+        }
+
+        /// <summary>
+        /// Driverを登録する。優先度が高いものから実行され、同じ優先度なら登録順(添え字)が大きい方が先に実行される。
+        /// どのスレッドからでも呼び出し可能(実際の反映は次のUpdateで行われる)。
+        /// </summary>
+        public void RegisterDriver(CharacterDriverBase driver)
+        {
+            if (driver == null) return;
+            int index = Interlocked.Increment(ref _nextRegistrationIndex);
+            _pendingRegistrations.Enqueue(new DriverEntry(driver, index));
+
+
+
+            //if (driver == null)
+            //{
+            //    return;
+            //}
+
+            ////lock ()
+            //{
+            //    int index = ++_nextRegistrationIndex;
+            //}
+            //_pendingRegistrations.Enqueue(new DriverEntry(driver, index));
+        }
+
+        /// <summary>
+        /// Driverを解除する。どのスレッドからでも呼び出し可能(実際の反映は次のUpdateで行われる)。
+        /// </summary>
+        public void UnregisterDriver(CharacterDriverBase driver)
+        {
+            if (driver == null) return;
+            _pendingUnregistrations.Enqueue(driver);
+        }
+
+        private void ApplyPendingDriverChanges()
+        {
+            bool changed = false;
+
+            while (_pendingRegistrations.TryDequeue(out DriverEntry entry))
+            {
+                entry.Driver.Owner = this;
+                _drivers.Add(entry);
+                changed = true;
+            }
+
+            while (_pendingUnregistrations.TryDequeue(out CharacterDriverBase driver))
+            {
+                for (int i = _drivers.Count - 1; i >= 0; i--)
+                {
+                    if (ReferenceEquals(_drivers[i].Driver, driver))
+                    {
+                        _drivers.RemoveAt(i);
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!changed) return;
+
+            _drivers.Sort((a, b) =>
+            {
+                int byPriority = b.Driver.Priority.CompareTo(a.Driver.Priority); // 優先度が高い順
+                return byPriority != 0 ? byPriority : b.RegistrationIndex.CompareTo(a.RegistrationIndex); // 同値なら添え字が大きい方を優先
+            });
+        }
+
+        /// <summary>
+        /// 登録済みDriverの中から指定した型のものを探して返す。無ければnull。
+        /// AttackDriver等が対象キャラクターのDamageDriverを探す、といった用途を想定。
+        /// </summary>
+        public T GetDriver<T>() where T : CharacterDriverBase
+        {
+            for (int i = 0; i < _drivers.Count; i++)
+            {
+                if (_drivers[i].Driver is T typed)
+                {
+                    return typed;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// GameInputManagerなど外部から、このキャラクターの「入力を読むDriver」を差し替える。
+        /// ユーザーならKeyboardInputDriver/GamepadInputDriver、NPCならNpcInputDriverのように、
+        /// RegisterDriverの対象を切り替えるだけで実現している。
+        /// </summary>
+        public void SetInputDriver(CharacterDriverBase driver, InputSourceType typeForDisplay)
+        {
+            if (_inputDriver != null)
+            {
+                UnregisterDriver(_inputDriver);
+            }
+
+            _inputDriver = driver;
+            inputSourceType = typeForDisplay;
+            RegisterDriver(_inputDriver);
+        }
+
+        /// <summary>
+        /// Inspectorで指定されたInputSourceTypeの通りに、入力Driverを構築する。
+        /// </summary>
+        private CharacterDriverBase CreateInputDriverFromInspector()
+        {
+            switch (inputSourceType)
+            {
+                case InputSourceType.Keyboard:
+                    return new KeyboardInputDriver();
+                case InputSourceType.Gamepad:
+                    return new GamepadInputDriver(gamepadIndex);
+                default:
+                    return new NpcInputDriver();
+            }
+        }
+    }
+
+}
+
