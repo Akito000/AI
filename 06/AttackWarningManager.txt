@@ -1,0 +1,152 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.AttackWarning
+{
+    /// <summary>
+    /// 攻撃予告の生成と回収を管理するシングルトン。
+    ///
+    /// Showを呼ぶたびに別の攻撃予告を取得するため、
+    /// 複数箇所への同時表示にも対応している。
+    /// </summary>
+    public sealed class AttackWarningManager : MonoBehaviour
+    {
+        public static AttackWarningManager Instance { get; private set; }
+
+        /// <summary>
+        /// プレハブごとの未使用インスタンス。
+        ///
+        /// 同じ種類の攻撃予告を再利用することで、
+        /// InstantiateとDestroyの頻発を防ぐ。
+        /// </summary>
+        private readonly Dictionary<
+            AttackWarningEffect,
+            Queue<AttackWarningEffect>> pools = new();
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Debug.LogWarning(
+                    "AttackWarningManagerが複数存在したため、後から生成された方を破棄します。",
+                    this);
+
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
+
+        /// <summary>
+        /// 攻撃予告を表示する。
+        ///
+        /// 呼び出すたびに別のインスタンスを取得するため、
+        /// 同時に複数の攻撃予告を表示できる。
+        /// </summary>
+        public AttackWarningHandle Show(
+            AttackWarningRequest request)
+        {
+            if (request.Prefab == null)
+            {
+                Debug.LogError(
+                    "攻撃予告のPrefabが設定されていません。",
+                    this);
+
+                return null;
+            }
+
+            AttackWarningEffect effect =
+                Rent(request.Prefab);
+
+            int generation = effect.Activate(
+                this,
+                request.Prefab,
+                request);
+
+            return new AttackWarningHandle(
+                effect,
+                generation);
+        }
+
+        /// <summary>
+        /// 指定したプレハブに対応する攻撃予告を取得する。
+        ///
+        /// 未使用の予告があれば再利用し、
+        /// 全て使用中なら新しく生成する。
+        /// </summary>
+        private AttackWarningEffect Rent(
+            AttackWarningEffect prefab)
+        {
+            if (pools.TryGetValue(prefab, out var pool))
+            {
+                while (pool.Count > 0)
+                {
+                    AttackWarningEffect effect =
+                        pool.Dequeue();
+
+                    // 外部で破棄されていた場合は飛ばす。
+                    if (effect != null)
+                    {
+                        return effect;
+                    }
+                }
+            }
+
+            AttackWarningEffect newEffect =
+                Instantiate(prefab, transform);
+
+            newEffect.gameObject.SetActive(false);
+
+            return newEffect;
+        }
+
+        /// <summary>
+        /// 使用済みの攻撃予告を非表示にし、
+        /// 対応するプレハブのプールへ返却する。
+        /// </summary>
+        internal void Release(
+            AttackWarningEffect effect,
+            int generation)
+        {
+            if (effect == null)
+            {
+                return;
+            }
+
+            if (!effect.IsActive(generation))
+            {
+                return;
+            }
+
+            AttackWarningEffect sourcePrefab =
+                effect.SourcePrefab;
+
+            effect.Deactivate(transform);
+
+            if (sourcePrefab == null)
+            {
+                Destroy(effect.gameObject);
+                return;
+            }
+
+            if (!pools.TryGetValue(
+                    sourcePrefab,
+                    out var pool))
+            {
+                pool = new Queue<AttackWarningEffect>();
+                pools.Add(sourcePrefab, pool);
+            }
+
+            pool.Enqueue(effect);
+        }
+    }
+}

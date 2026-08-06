@@ -1,0 +1,178 @@
+using UnityEngine;
+
+namespace Game.AttackWarning
+{
+    /// <summary>
+    /// 攻撃予告の寿命管理方法。
+    /// </summary>
+    public enum AttackWarningLifetime
+    {
+        /// <summary>
+        /// Handle.Hide()が呼ばれるまで表示し続ける。
+        /// </summary>
+        Manual,
+
+        /// <summary>
+        /// 指定時間経過後に自動で消える。
+        /// </summary>
+        Timed
+    }
+
+    /// <summary>
+    /// 攻撃予告を生成するときの設定。
+    /// </summary>
+    public readonly struct AttackWarningRequest
+    {
+        public AttackWarningEffect Prefab { get; }
+
+        public Vector3 WorldPosition { get; }
+
+        public Quaternion Rotation { get; }
+
+        public bool IsFollowing { get; }
+
+        public Transform FollowTarget { get; }
+
+        public Vector3 FollowOffset { get; }
+
+        public AttackWarningLifetime Lifetime { get; }
+
+        public float Duration { get; }
+
+        public bool AutoHideWhenTargetLost { get; }
+
+        private AttackWarningRequest(
+            AttackWarningEffect prefab,
+            Vector3 worldPosition,
+            Quaternion rotation,
+            bool isFollowing,
+            Transform followTarget,
+            Vector3 followOffset,
+            AttackWarningLifetime lifetime,
+            float duration,
+            bool autoHideWhenTargetLost)
+        {
+            Prefab = prefab;
+            WorldPosition = worldPosition;
+            Rotation = rotation;
+
+            IsFollowing = isFollowing;
+            FollowTarget = followTarget;
+            FollowOffset = followOffset;
+
+            Lifetime = lifetime;
+            Duration = duration;
+            AutoHideWhenTargetLost = autoHideWhenTargetLost;
+        }
+
+        /// <summary>
+        /// 指定座標に一定時間表示する。
+        /// 落石、範囲攻撃、爆発予告などに使用する。
+        /// </summary>
+        public static AttackWarningRequest TimedAt(
+            AttackWarningEffect prefab,
+            Vector3 position,
+            float duration)
+        {
+            return TimedAt(
+                prefab,
+                position,
+                Quaternion.identity,
+                duration);
+        }
+
+        /// <summary>
+        /// 指定座標・指定回転で一定時間表示する。
+        /// </summary>
+        public static AttackWarningRequest TimedAt(
+            AttackWarningEffect prefab,
+            Vector3 position,
+            Quaternion rotation,
+            float duration)
+        {
+            return new AttackWarningRequest(
+                prefab,
+                position,
+                rotation,
+                false,
+                null,
+                Vector3.zero,
+                AttackWarningLifetime.Timed,
+                Mathf.Max(0.01f, duration),
+                false);
+        }
+
+        /// <summary>
+        /// 指定座標に、明示的に消すまで表示する。
+        /// </summary>
+        public static AttackWarningRequest ManualAt(
+            AttackWarningEffect prefab,
+            Vector3 position)
+        {
+            return new AttackWarningRequest(
+                prefab,
+                position,
+                Quaternion.identity,
+                false,
+                null,
+                Vector3.zero,
+                AttackWarningLifetime.Manual,
+                0.0f,
+                false);
+        }
+
+        /// <summary>
+        /// ターゲットを追従し、Handle.Hide()が呼ばれるまで表示する。
+        /// 敵が狙っているプレイヤーの足元などに使用する。
+        /// </summary>
+        public static AttackWarningRequest FollowUntilHidden(
+            AttackWarningEffect prefab,
+            Transform target,
+            Vector3 offset,
+            bool autoHideWhenTargetLost = true)
+        {
+            Vector3 initialPosition =
+                target != null
+                    ? target.position + offset
+                    : Vector3.zero;
+
+            return new AttackWarningRequest(
+                prefab,
+                initialPosition,
+                Quaternion.identity,
+                true,
+                target,
+                offset,
+                AttackWarningLifetime.Manual,
+                0.0f,
+                autoHideWhenTargetLost);
+        }
+
+        /// <summary>
+        /// ターゲットを追従しながら、一定時間後に自動で消す。
+        /// </summary>
+        public static AttackWarningRequest FollowForSeconds(
+            AttackWarningEffect prefab,
+            Transform target,
+            Vector3 offset,
+            float duration,
+            bool autoHideWhenTargetLost = true)
+        {
+            Vector3 initialPosition =
+                target != null
+                    ? target.position + offset
+                    : Vector3.zero;
+
+            return new AttackWarningRequest(
+                prefab,
+                initialPosition,
+                Quaternion.identity,
+                true,
+                target,
+                offset,
+                AttackWarningLifetime.Timed,
+                Mathf.Max(0.01f, duration),
+                autoHideWhenTargetLost);
+        }
+    }
+}

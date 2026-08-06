@@ -1,0 +1,82 @@
+using UnityEngine;
+
+namespace Game.AttackWarning
+{
+    /// <summary>
+    /// 生成した攻撃予告を外部から操作するためのクラス。
+    /// </summary>
+    public sealed class AttackWarningHandle
+    {
+        private AttackWarningEffect effect;
+
+        /// <summary>
+        /// プール再利用後のオブジェクトを古いHandleから操作しないための番号。
+        /// </summary>
+        private readonly int generation;
+
+        internal AttackWarningHandle(
+            AttackWarningEffect effect,
+            int generation)
+        {
+            this.effect = effect;
+            this.generation = generation;
+        }
+
+        /// <summary>
+        /// このHandleが現在も有効か。
+        /// </summary>
+        public bool IsValid =>
+            effect != null &&
+            effect.IsActive(generation);
+
+        /// <summary>
+        /// 攻撃予告を消す。
+        /// すでに消えている場合は何もしない。
+        /// </summary>
+        public void Hide()
+        {
+            if (effect == null)
+            {
+                return;
+            }
+
+            effect.RequestHide(generation);
+            effect = null;
+        }
+
+        /// <summary>
+        /// 追従を解除し、指定したワールド座標へ移動する。
+        /// </summary>
+        public bool MoveTo(Vector3 worldPosition)
+        {
+            if (effect == null)
+            {
+                return false;
+            }
+
+            return effect.TryMoveTo(
+                generation,
+                worldPosition);
+        }
+
+        /// <summary>
+        /// 追従対象を変更する。
+        /// </summary>
+        public bool Follow(
+            Transform target,
+            Vector3 offset,
+            bool autoHideWhenTargetLost = true)
+        {
+            if (effect == null)
+            {
+                return false;
+            }
+
+            return effect.TryFollow(
+                generation,
+                target,
+                offset,
+                autoHideWhenTargetLost);
+        }
+    }
+}

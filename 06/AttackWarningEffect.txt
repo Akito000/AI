@@ -1,0 +1,212 @@
+using UnityEngine;
+
+namespace Game.AttackWarning
+{
+    /// <summary>
+    /// 実際に表示される攻撃予告エフェクト。
+    /// 攻撃予告プレハブのルートに付ける。
+    /// </summary>
+    public sealed class AttackWarningEffect : MonoBehaviour
+    {
+        private AttackWarningManager owner;
+
+        /// <summary>
+        /// どのプレハブから生成されたか。
+        /// プールへ返すときの分類に使用する。
+        /// </summary>
+        internal AttackWarningEffect SourcePrefab { get; private set; }
+
+        private int generation;
+        private bool isActive;
+
+        private bool isFollowing;
+        private Transform followTarget;
+        private Vector3 followOffset;
+        private bool autoHideWhenTargetLost;
+
+        private AttackWarningLifetime lifetime;
+        private float remainingTime;
+
+        /// <summary>
+        /// Managerから呼ばれる初期化処理。
+        /// </summary>
+        internal int Activate(
+            AttackWarningManager owner,
+            AttackWarningEffect sourcePrefab,
+            AttackWarningRequest request)
+        {
+            this.owner = owner;
+            SourcePrefab = sourcePrefab;
+
+            generation++;
+            isActive = true;
+
+            lifetime = request.Lifetime;
+            remainingTime = request.Duration;
+
+            isFollowing = request.IsFollowing;
+            followTarget = request.FollowTarget;
+            followOffset = request.FollowOffset;
+            autoHideWhenTargetLost =
+                request.AutoHideWhenTargetLost;
+
+            transform.SetPositionAndRotation(
+                request.WorldPosition,
+                request.Rotation);
+
+            // 追従型の場合は、表示した瞬間から正しい位置へ移動させる。
+            if (isFollowing && followTarget != null)
+            {
+                UpdateFollowPosition();
+            }
+
+            gameObject.SetActive(true);
+
+            return generation;
+        }
+
+        private void Update()
+        {
+            if (!isActive)
+            {
+                return;
+            }
+
+            if (lifetime != AttackWarningLifetime.Timed)
+            {
+                return;
+            }
+
+            remainingTime -= Time.deltaTime;
+
+            if (remainingTime <= 0.0f)
+            {
+                RequestHide(generation);
+            }
+        }
+
+        private void LateUpdate()
+        {
+            if (!isActive || !isFollowing)
+            {
+                return;
+            }
+
+            if (followTarget == null)
+            {
+                if (autoHideWhenTargetLost)
+                {
+                    RequestHide(generation);
+                }
+
+                return;
+            }
+
+            UpdateFollowPosition();
+        }
+
+        /// <summary>
+        /// ターゲット位置へ追従する。
+        /// </summary>
+        private void UpdateFollowPosition()
+        {
+            transform.position =
+                followTarget.position + followOffset;
+        }
+
+        /// <summary>
+        /// 指定世代の予告が現在有効か。
+        /// </summary>
+        internal bool IsActive(int targetGeneration)
+        {
+            return isActive &&
+                   generation == targetGeneration;
+        }
+
+        /// <summary>
+        /// Handleまたは時間切れから呼ばれる終了要求。
+        /// </summary>
+        internal void RequestHide(int targetGeneration)
+        {
+            if (!IsActive(targetGeneration))
+            {
+                return;
+            }
+
+            if (owner != null)
+            {
+                owner.Release(this, targetGeneration);
+                return;
+            }
+
+            // Managerが先に破棄されていた場合の保険。
+            Destroy(gameObject);
+        }
+
+        /// <summary>
+        /// 追従を解除して指定位置へ移動する。
+        /// </summary>
+        internal bool TryMoveTo(
+            int targetGeneration,
+            Vector3 worldPosition)
+        {
+            if (!IsActive(targetGeneration))
+            {
+                return false;
+            }
+
+            isFollowing = false;
+            followTarget = null;
+            transform.position = worldPosition;
+
+            return true;
+        }
+
+        /// <summary>
+        /// 追従対象を変更する。
+        /// </summary>
+        internal bool TryFollow(
+            int targetGeneration,
+            Transform target,
+            Vector3 offset,
+            bool hideWhenTargetLost)
+        {
+            if (!IsActive(targetGeneration))
+            {
+                return false;
+            }
+
+            if (target == null)
+            {
+                return false;
+            }
+
+            isFollowing = true;
+            followTarget = target;
+            followOffset = offset;
+            autoHideWhenTargetLost = hideWhenTargetLost;
+
+            UpdateFollowPosition();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Managerから呼ばれる回収処理。
+        /// </summary>
+        internal void Deactivate(Transform poolRoot)
+        {
+            isActive = false;
+
+            isFollowing = false;
+            followTarget = null;
+            followOffset = Vector3.zero;
+
+            remainingTime = 0.0f;
+            owner = null;
+
+            gameObject.SetActive(false);
+            transform.SetParent(poolRoot, false);
+        }
+    }
+}

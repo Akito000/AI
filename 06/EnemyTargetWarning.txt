@@ -1,0 +1,70 @@
+using UnityEngine;
+using Game.AttackWarning;
+
+public sealed class EnemyTargetWarning : MonoBehaviour
+{
+    [SerializeField]
+    private AttackWarningManager warningManager;
+
+    [SerializeField]
+    private AttackWarningEffect warningPrefab;
+
+    /// <summary>
+    /// プレイヤーのTransform原点が腰にある場合などに調整する。
+    /// </summary>
+    [SerializeField]
+    private Vector3 footOffset = Vector3.zero;
+
+    private AttackWarningHandle warningHandle;
+
+    [SerializeField] private Transform target;
+
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.H))
+        {
+            BeginTargeting(target);
+        }
+
+        
+
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            EndTargeting();
+        }
+    }
+
+    /// <summary>
+    /// プレイヤーを狙い始めたときに呼ぶ。
+    /// </summary>
+    public void BeginTargeting(Transform target)
+    {
+        EndTargeting();
+
+        if (target == null)
+        {
+            return;
+        }
+
+        warningHandle = warningManager.Show(
+            AttackWarningRequest.FollowUntilHidden(
+                warningPrefab,
+                target,
+                footOffset,
+                autoHideWhenTargetLost: true));
+    }
+
+    /// <summary>
+    /// ターゲット解除、攻撃終了、攻撃キャンセル時に呼ぶ。
+    /// </summary>
+    public void EndTargeting()
+    {
+        warningHandle?.Hide();
+        warningHandle = null;
+    }
+
+    private void OnDisable()
+    {
+        EndTargeting();
+    }
+}
