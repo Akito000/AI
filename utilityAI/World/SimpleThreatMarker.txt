@@ -1,0 +1,40 @@
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.World
+{
+    /// <summary>
+    /// シーンに置いたオブジェクトを、雑魚敵/ボスとしてUtility AIから見えるようにする最小限の具象マーカー。
+    /// 本格的な敵/ボスシステムができるまでの動作確認用(ダメージ処理・死亡演出等は持たない、純粋なデータ提供)。
+    /// IEnemyInfo/IBossInfoの両方を実装しており、actAsEnemy/actAsBossで「どちらとして扱うか」を
+    /// Inspectorから選べる(両方onなら、雑魚敵向けAction・ボス向けAction両方の候補になる)。
+    /// </summary>
+    public class SimpleThreatMarker : MonoBehaviour, IEnemyInfo, IBossInfo
+    {
+        [Header("共通")]
+        [SerializeField] private ColorType color = ColorType.Red;
+        [SerializeField, Range(0f, 1f)] private float dangerLevel = 0.5f;
+        [SerializeField] private bool isAlive = true;
+
+        [Header("扱い方")]
+        [Tooltip("Attacker用の「雑魚敵」向けAction(同色限定)の対象にするか")]
+        [SerializeField] private bool actAsEnemy = true;
+        [Tooltip("Attacker用の「ボス」向けAction(色を問わない)の対象にするか")]
+        [SerializeField] private bool actAsBoss = true;
+        [Tooltip("ボスとして扱う場合、今攻撃可能な隙があるか")]
+        [SerializeField] private bool isAttackable = true;
+
+        public Transform Transform => transform;
+        public Vector3 Position => transform.position;
+        public ColorType Color => color;
+        public float DangerLevel => dangerLevel;
+        public bool IsAlive => isAlive;
+        public bool IsAttackable => isAttackable;
+
+        /// <summary>攻撃予告(色付き範囲攻撃)システムは未実装のため常にnull。</summary>
+        public IIncomingAttackInfo CurrentAttack => null;
+
+        public bool ActAsEnemy => actAsEnemy;
+        public bool ActAsBoss => actAsBoss;
+    }
+}

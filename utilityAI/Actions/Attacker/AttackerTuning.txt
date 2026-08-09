@@ -1,0 +1,14 @@
+namespace Game.AI
+{
+    /// <summary>Attacker系Actionで共有する数値。複数のActionクラス間で値がズレないよう1箇所にまとめてある。</summary>
+    internal static class AttackerTuning
+    {
+        // 敵/ボスのColliderサイズは相手ごとに異なる(例: 5倍スケールのボスは半径2.5)。
+        // Utility AIのTarget情報(IEnemyInfo/IBossInfo)は現状サイズを持たないため、
+        // ここでは物理的な当たり判定より確実に大きい値を持たせ、Colliderに阻まれて
+        // 「間合いに入ったつもりが実際には近づけない」状態にならないようにしている。
+        public const float MeleeRange = 4f;
+        public const float SearchRadius = 25f;
+        public const float StrongAttackCooldown = 4f;
+    }
+}

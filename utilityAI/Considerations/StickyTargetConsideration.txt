@@ -1,0 +1,25 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// 「直前のThinkで選んでいたTargetと同じなら少しだけスコアを底上げする」ヒステリシス用Consideration。
+    /// これが無いと、複数のTargetがほぼ同スコアのときにThinkのたびに対象がコロコロ入れ替わり、
+    /// 移動先が毎回変わって見た目上ずっと迷っているように見えてしまう。
+    /// スコアへの影響はbonusRatio分だけ底上げする程度に留め、他のConsiderationを圧倒しないようにする。
+    /// </summary>
+    public class StickyTargetConsideration : ConsiderationBase
+    {
+        private readonly float _bonusRatio;
+
+        public StickyTargetConsideration(float bonusRatio = 0.15f, string key = "Sticky", float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _bonusRatio = bonusRatio;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            bool isSameAsPrevious = target != null && Equals(target, context.PreviousTarget);
+            return isSameAsPrevious ? 1f : (1f - _bonusRatio);
+        }
+    }
+}

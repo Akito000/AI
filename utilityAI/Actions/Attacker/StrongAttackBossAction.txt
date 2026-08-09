@@ -1,0 +1,34 @@
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「ボスへ強攻撃」。ジョブ固有の強攻撃をボスへ叩き込む。雑魚敵よりも基礎重要度を高くしてある。</summary>
+    public class StrongAttackBossAction : UseAbilityActionBase
+    {
+        public override string Name => "StrongAttackBoss";
+        public override float BaseWeight => 1.4f;
+
+        protected override float CooldownSeconds => AttackerTuning.StrongAttackCooldown;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(Game.CharacterInput.RoleFlag.Attacker, key: "StrongAttackBoss:IsAttacker"),
+            new DistanceConsideration("StrongAttackBoss:InRange", AttackerTuning.MeleeRange, preferNear: true),
+            new CooldownReadyConsideration("StrongAttackBoss", AttackerTuning.StrongAttackCooldown),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss != null && context.Boss.IsAlive && context.Boss.IsAttackable)
+            {
+                yield return context.Boss;
+            }
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new SpecialActionCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}

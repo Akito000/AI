@@ -1,0 +1,32 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// 「あとどれくらいで手遅れになるか」を評価するConsideration。
+    /// 敵攻撃の着弾までの時間、状態異常の残り耐久時間など、TargetUtility.GetRemainingSecondsが
+    /// 対応している型であれば共通して使える(reactionWindow秒以内に迫っているほどスコアが高くなる)。
+    /// 時間の概念を持たないTarget(雑魚敵そのもの等)に使った場合は中立(1=気にしない)を返す。
+    /// </summary>
+    public class TimeToImpactConsideration : ConsiderationBase
+    {
+        private readonly float _reactionWindowSeconds;
+
+        public TimeToImpactConsideration(float reactionWindowSeconds, string key = "TimeToImpact", float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _reactionWindowSeconds = reactionWindowSeconds;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            float? remaining = TargetUtility.GetRemainingSeconds(target);
+            if (remaining == null) return 1f;
+
+            return ConsiderationCurves.Normalize(remaining.Value, _reactionWindowSeconds, 0f);
+        }
+
+        protected override float ApplyCurve(float normalizedRaw)
+        {
+            return ConsiderationCurves.QuadraticEaseOut(normalizedRaw);
+        }
+    }
+}

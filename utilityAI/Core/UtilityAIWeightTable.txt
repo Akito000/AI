@@ -1,0 +1,63 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Action / Considerationの重みだけをUnity Editor上から調整できるようにする、単一のScriptableObjectアセット。
+    ///
+    /// なぜConsideration/Actionごとに個別のScriptableObjectを作らないか:
+    /// このプロジェクトの規模・体制では調整するのはコードを書く本人(プログラマー)であり、
+    /// 「非エンジニアがコードに触れず数値だけ調整する」ための分離コスト(Considerationごとに
+    /// アセットを作る/専用エディタを書く)が、素のC#コンストラクタ引数を直接書き換えるコストを
+    /// 上回ってしまう。一方で「プレイしながら数値だけEditor上で触りたい」というニーズはあるため、
+    /// Action名/Consideration名をキーにした単一のルックアップテーブルアセットだけを用意し、
+    /// 未設定のキーはコード側のデフォルト値へフォールバックする(アセットが無くても動く)。
+    /// </summary>
+    [CreateAssetMenu(fileName = "UtilityAIWeightTable", menuName = "AI/Utility AI Weight Table")]
+    public class UtilityAIWeightTable : ScriptableObject
+    {
+        [Serializable]
+        public struct WeightEntry
+        {
+            public string Key;
+            public float Value;
+        }
+
+        [Tooltip("ActionのNameまたはConsiderationのKeyをそのままキーにする。未設定のキーはコード側のデフォルト値を使う。")]
+        [SerializeField] private List<WeightEntry> weights = new List<WeightEntry>();
+
+        private Dictionary<string, float> _lookup;
+
+        public bool TryGetWeight(string key, out float value)
+        {
+            if (_lookup == null) BuildLookup();
+            return _lookup.TryGetValue(key, out value);
+        }
+
+        /// <summary>context(とWeightTable)がnullでも安全に呼べる、デフォルト値へのフォールバック付き解決ヘルパー。</summary>
+        public static float Resolve(UtilityContext context, string key, float defaultValue)
+        {
+            if (context?.WeightTable != null && context.WeightTable.TryGetWeight(key, out float value))
+            {
+                return value;
+            }
+            return defaultValue;
+        }
+
+        private void BuildLookup()
+        {
+            _lookup = new Dictionary<string, float>(weights.Count);
+            for (int i = 0; i < weights.Count; i++)
+            {
+                _lookup[weights[i].Key] = weights[i].Value;
+            }
+        }
+
+        private void OnValidate()
+        {
+            _lookup = null;
+        }
+    }
+}

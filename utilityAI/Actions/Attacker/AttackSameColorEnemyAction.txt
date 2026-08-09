@@ -1,0 +1,35 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「同色の雑魚敵を攻撃」(弱攻撃)。間合いに入った同色の雑魚敵を優先して攻撃する。</summary>
+    public class AttackSameColorEnemyAction : UseAbilityActionBase
+    {
+        public override string Name => "AttackSameColorEnemy";
+        public override float BaseWeight => 1.3f;
+
+        private const float CooldownDuration = 1.2f;
+        protected override float CooldownSeconds => CooldownDuration;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "AttackEnemy:IsAttacker"),
+            new ColorMatchConsideration("AttackEnemy:ColorMatch"),
+            new DangerConsideration("AttackEnemy:Danger"),
+            new DistanceConsideration("AttackEnemy:InRange", AttackerTuning.MeleeRange, preferNear: true),
+            new CooldownReadyConsideration("AttackSameColorEnemy", CooldownDuration),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Enemies.Where(e => e.IsAlive).Cast<object>();
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new WeakAttackCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}

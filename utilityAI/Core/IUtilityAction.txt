@@ -1,0 +1,36 @@
+using System.Collections.Generic;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Utility AIが比較する行動候補1種類。Idle・移動・攻撃・バリア・回復・ジョブ交換など、
+    /// 「後から追加できる」ことを最優先にした最小のinterface。
+    /// 実装クラスはAssets/Scripts/AI/Actions以下にジョブ別・共通で分けて置く。
+    /// </summary>
+    public interface IUtilityAction
+    {
+        /// <summary>ログ表示・UtilityAIWeightTableでの重み上書きキーにも使う一意な名前。</summary>
+        string Name { get; }
+
+        /// <summary>Considerationで正規化した後に掛けるAction自体の基礎重要度。UtilityAIWeightTableで上書き可能。</summary>
+        float BaseWeight { get; }
+
+        /// <summary>
+        /// 通常のThink Intervalだけでなく、より高頻度なUrgent Checkの対象にもするか。
+        /// 「即死級攻撃が来る」「今すぐバリアが必要」等、直後の1〜2フレームを争う行動だけtrueにする。
+        /// </summary>
+        bool IsUrgentCapable { get; }
+
+        /// <summary>このActionのスコアを構成するConsideration一覧。</summary>
+        IReadOnlyList<IConsideration> Considerations { get; }
+
+        /// <summary>
+        /// このActionが比較したいTarget候補を列挙する。Target不要な行動(Idle等)は要素1つ(null)を返す。
+        /// 「Action+Targetの組み合わせ」を評価するため、同じActionでも複数Targetがあれば複数候補になる。
+        /// </summary>
+        IEnumerable<object> GetTargetCandidates(UtilityContext context);
+
+        /// <summary>このAction+Targetが選ばれた際に呼ばれる。resultへ移動先やコマンドを書き込む。</summary>
+        void Act(UtilityContext context, object target, NpcDecisionResult result);
+    }
+}

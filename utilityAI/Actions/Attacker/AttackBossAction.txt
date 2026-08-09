@@ -1,0 +1,35 @@
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「ボスを攻撃」(弱攻撃)。間合いに入っているボスへ弱攻撃を当てる。</summary>
+    public class AttackBossAction : UseAbilityActionBase
+    {
+        public override string Name => "AttackBoss";
+        public override float BaseWeight => 1.1f;
+
+        private const float CooldownDuration = 1.2f;
+        protected override float CooldownSeconds => CooldownDuration;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "AttackBoss:IsAttacker"),
+            new DistanceConsideration("AttackBoss:InRange", AttackerTuning.MeleeRange, preferNear: true),
+            new CooldownReadyConsideration("AttackBoss", CooldownDuration),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss != null && context.Boss.IsAlive && context.Boss.IsAttackable)
+            {
+                yield return context.Boss;
+            }
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new WeakAttackCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}

@@ -1,0 +1,35 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「雑魚敵を強攻撃」。ジョブ固有の強攻撃(SpecialActionCommand)で同色の雑魚敵にトドメを刺す。</summary>
+    public class StrongAttackEnemyAction : UseAbilityActionBase
+    {
+        public override string Name => "StrongAttackEnemy";
+        public override float BaseWeight => 1.6f;
+        public override bool IsUrgentCapable => true;
+
+        protected override float CooldownSeconds => AttackerTuning.StrongAttackCooldown;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "StrongAttackEnemy:IsAttacker"),
+            new ColorMatchConsideration("StrongAttackEnemy:ColorMatch"),
+            new DangerConsideration("StrongAttackEnemy:Danger", easeIn: true),
+            new DistanceConsideration("StrongAttackEnemy:InRange", AttackerTuning.MeleeRange, preferNear: true),
+            new CooldownReadyConsideration("StrongAttackEnemy", AttackerTuning.StrongAttackCooldown),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Enemies.Where(e => e.IsAlive).Cast<object>();
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new SpecialActionCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}

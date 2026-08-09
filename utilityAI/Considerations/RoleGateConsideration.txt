@@ -1,0 +1,29 @@
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 「今の自分のロールがrequiredRoleかどうか」でActionの可否を決めるゲート用Consideration。
+    /// invert=trueにすると「requiredRoleでは*ない*ときだけ有効」という逆ゲートになる
+    /// (例: 「今Tankではないなら、Tankへのジョブ交換を検討したい」)。
+    /// </summary>
+    public class RoleGateConsideration : ConsiderationBase
+    {
+        private readonly RoleFlag _requiredRole;
+        private readonly bool _invert;
+
+        public RoleGateConsideration(RoleFlag requiredRole, bool invert = false, string key = null, float defaultWeight = 1f)
+            : base(key ?? $"RoleGate:{requiredRole}", defaultWeight)
+        {
+            _requiredRole = requiredRole;
+            _invert = invert;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            bool hasRole = context.SelfRole == _requiredRole;
+            bool pass = _invert ? !hasRole : hasRole;
+            return pass ? 1f : 0f;
+        }
+    }
+}

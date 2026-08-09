@@ -1,0 +1,31 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 選ばれたAction+Targetが、そのThinkで反映してほしい結果を書き込む出力先。
+    /// 移動は「目的地」を書くだけにとどめ、実際の経路追従・MoveCommand生成は
+    /// NpcNavigationDriverが毎フレーム行う(意思決定と移動更新の責務分離)。
+    /// </summary>
+    public class NpcDecisionResult
+    {
+        public IUtilityAction Action;
+        public object Target;
+
+        /// <summary>nullなら「今は特に目指す場所は無い(その場に留まる)」。</summary>
+        public Vector3? MoveDestination;
+
+        /// <summary>このThinkで新たに発行したい単発コマンド(弱攻撃・特殊行動・ジョブ交換要求など)。</summary>
+        public readonly List<ICommand> Commands = new List<ICommand>();
+
+        public void Reset()
+        {
+            Action = null;
+            Target = null;
+            MoveDestination = null;
+            Commands.Clear();
+        }
+    }
+}

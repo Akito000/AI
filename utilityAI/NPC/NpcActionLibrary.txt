@@ -1,0 +1,57 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// NPCが比較検討するAction一覧を組み立てるファクトリ。
+    /// 新しい行動を追加したいときは、IUtilityActionを実装したクラスを1つ作り、ここに1行足すだけでよい
+    /// (NpcThinkDriverやほかのActionを書き換える必要は無い)。
+    /// </summary>
+    public static class NpcActionLibrary
+    {
+        public static List<IUtilityAction> CreateDefault()
+        {
+            return new List<IUtilityAction>
+            {
+                // --- 共通 ---
+                new IdleAction(),
+                new WanderMoveAction(),
+                new RetreatFromDangerAction(),
+                new WeakAttackAction(),
+
+                // 「ジョブ切り替え」: 自分と同色の脅威が来ているのに今その役割ではない、という状況で
+                // スコアが上がる。3ロール分を同じクラスの使い回しで表現している。
+                new RoleSwapForThreatAction(
+                    "SwapToTankForAttack", RoleFlag.Tank, baseWeight: 1.8f, reactionWindowSeconds: 3f,
+                    threatSelector: ctx => ctx.IncomingAttacks.Cast<object>()),
+                new RoleSwapForThreatAction(
+                    "SwapToHealerForAilment", RoleFlag.Healer, baseWeight: 1.3f, reactionWindowSeconds: 4f,
+                    threatSelector: ctx => ctx.Ailments.Cast<object>()),
+                new RoleSwapForThreatAction(
+                    "SwapToAttackerForEnemy", RoleFlag.Attacker, baseWeight: 0.6f, reactionWindowSeconds: 5f,
+                    threatSelector: ctx => ctx.Enemies.Cast<object>()),
+
+                // --- Attacker ---
+                new MoveToSameColorEnemyAction(),
+                new AttackSameColorEnemyAction(),
+                new StrongAttackEnemyAction(),
+                new MoveToBossAction(),
+                new AttackBossAction(),
+                new StrongAttackBossAction(),
+
+                // --- Tank ---
+                new MoveToProtectEndangeredAllyAction(),
+                new MoveToInterceptAttackAction(),
+                new UseBarrierAction(),
+                new BlockAttackAction(),
+                new MoveToGuardPositionAction(),
+
+                // --- Healer ---
+                new MoveToAilingAllyAction(),
+                new CureAilmentAction(),
+            };
+        }
+    }
+}

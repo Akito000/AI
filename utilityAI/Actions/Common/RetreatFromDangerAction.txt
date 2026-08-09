@@ -1,0 +1,44 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「危険な場所から退避」。自分自身が対象になっている危険な敵攻撃から、逆方向へ離れる。
+    /// 色が一致していてTankが防げる状況ではBlockAttackAction/UseBarrierAction側の基礎重要度を高くしてあるため、
+    /// 「防げるなら防ぐ、防げない/自分の役割でないなら逃げる」がUtility Scoreの比較だけで自然に決まる。
+    /// </summary>
+    public class RetreatFromDangerAction : MoveToTargetActionBase
+    {
+        public override string Name => "RetreatFromDanger";
+        public override float BaseWeight => 1.1f;
+        public override bool IsUrgentCapable => true;
+
+        private const float ReactionWindowSeconds = 2.5f;
+        private const float RetreatDistance = 6f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new DangerConsideration("Retreat:Danger", easeIn: true),
+            new TimeToImpactConsideration(ReactionWindowSeconds, "Retreat:TimeToImpact"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks.Where(a => a.TargetPlayer == context.Self).Cast<object>();
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IIncomingAttackInfo attack) return;
+
+            Vector3 awayDirection = (context.SelfPosition - attack.Position);
+            awayDirection.y = 0f;
+            awayDirection = awayDirection.sqrMagnitude > 0.001f ? awayDirection.normalized : Vector3.forward;
+
+            result.MoveDestination = context.SelfPosition + awayDirection * RetreatDistance;
+        }
+    }
+}

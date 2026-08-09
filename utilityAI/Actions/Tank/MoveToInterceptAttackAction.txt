@@ -1,0 +1,31 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>Tank用「攻撃位置へ移動」。味方を狙う同色の敵攻撃そのものの着弾地点へ、割り込めるように移動する。</summary>
+    public class MoveToInterceptAttackAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToInterceptAttack";
+        public override float BaseWeight => 1.2f;
+        public override bool IsUrgentCapable => true;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, key: "Intercept:IsTank"),
+            new ColorMatchConsideration("Intercept:ColorMatch"),
+            new DangerConsideration("Intercept:Danger", easeIn: true),
+            new TimeToImpactConsideration(TankTuning.ReactionWindowSeconds, "Intercept:TimeToImpact"),
+            new StickyTargetConsideration(key: "Intercept:Sticky"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks
+                .Where(a => a.TargetPlayer != null && a.TargetPlayer != context.Self)
+                .Cast<object>();
+        }
+    }
+}

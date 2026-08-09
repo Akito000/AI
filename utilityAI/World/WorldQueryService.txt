@@ -1,0 +1,61 @@
+using System.Collections.Generic;
+
+namespace Game.World
+{
+    /// <summary>敵一覧を提供する側が実装するinterface。実際の敵管理システムができたら実装して登録する。</summary>
+    public interface IEnemyProvider
+    {
+        IReadOnlyList<IEnemyInfo> GetActiveEnemies();
+    }
+
+    /// <summary>ボス情報を提供する側が実装するinterface。</summary>
+    public interface IBossProvider
+    {
+        IBossInfo GetBoss();
+    }
+
+    /// <summary>現在飛んでいる/予告中の敵攻撃一覧を提供する側が実装するinterface。</summary>
+    public interface IIncomingAttackProvider
+    {
+        IReadOnlyList<IIncomingAttackInfo> GetIncomingAttacks();
+    }
+
+    /// <summary>現在発生している状態異常一覧を提供する側が実装するinterface。</summary>
+    public interface IStatusAilmentProvider
+    {
+        IReadOnlyList<IStatusAilmentInfo> GetActiveAilments();
+    }
+
+    /// <summary>
+    /// Utility AIが「敵/ボス/敵攻撃/状態異常」のデータを取得するための唯一の窓口(サービスロケータ)。
+    /// 現時点ではこれらのシステムが未実装のため、各Providerはnull(=未登録)でも安全に空リストを返す。
+    /// 将来、実際のEnemyManager等ができたらRegisterXxxProviderで登録するだけでAI側は変更不要になる。
+    /// </summary>
+    public static class WorldQueryService
+    {
+        private static readonly IReadOnlyList<IEnemyInfo> EmptyEnemies = new List<IEnemyInfo>(0);
+        private static readonly IReadOnlyList<IIncomingAttackInfo> EmptyAttacks = new List<IIncomingAttackInfo>(0);
+        private static readonly IReadOnlyList<IStatusAilmentInfo> EmptyAilments = new List<IStatusAilmentInfo>(0);
+
+        private static IEnemyProvider _enemyProvider;
+        private static IBossProvider _bossProvider;
+        private static IIncomingAttackProvider _incomingAttackProvider;
+        private static IStatusAilmentProvider _statusAilmentProvider;
+
+        public static void RegisterEnemyProvider(IEnemyProvider provider) => _enemyProvider = provider;
+        public static void RegisterBossProvider(IBossProvider provider) => _bossProvider = provider;
+        public static void RegisterIncomingAttackProvider(IIncomingAttackProvider provider) => _incomingAttackProvider = provider;
+        public static void RegisterStatusAilmentProvider(IStatusAilmentProvider provider) => _statusAilmentProvider = provider;
+
+        public static IReadOnlyList<IEnemyInfo> GetActiveEnemies() =>
+            _enemyProvider?.GetActiveEnemies() ?? EmptyEnemies;
+
+        public static IBossInfo GetBoss() => _bossProvider?.GetBoss();
+
+        public static IReadOnlyList<IIncomingAttackInfo> GetIncomingAttacks() =>
+            _incomingAttackProvider?.GetIncomingAttacks() ?? EmptyAttacks;
+
+        public static IReadOnlyList<IStatusAilmentInfo> GetActiveAilments() =>
+            _statusAilmentProvider?.GetActiveAilments() ?? EmptyAilments;
+    }
+}

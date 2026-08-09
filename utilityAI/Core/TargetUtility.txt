@@ -1,0 +1,76 @@
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Action/ConsiderationのTargetは用途によって型が異なる
+    /// (CharacterUpdater/IEnemyInfo/IBossInfo/IIncomingAttackInfo/IStatusAilmentInfo)。
+    /// 型を横断してよく使う値(位置・色)を取り出すための共通ヘルパー。
+    /// 新しいTarget種別を追加したときは、ここに1ケース足すだけで既存のConsideration/Actionが対応できる。
+    /// </summary>
+    public static class TargetUtility
+    {
+        public static Vector3? GetPosition(object target)
+        {
+            switch (target)
+            {
+                case CharacterUpdater character: return character.transform.position;
+                case IEnemyInfo enemy: return enemy.Position;
+                case IBossInfo boss: return boss.Position;
+                case IIncomingAttackInfo attack: return attack.Position;
+                default: return null;
+            }
+        }
+
+        public static ColorType? GetColor(object target)
+        {
+            switch (target)
+            {
+                case CharacterUpdater character: return character.Color;
+                case IEnemyInfo enemy: return enemy.Color;
+                case IIncomingAttackInfo attack: return attack.Color;
+                case IStatusAilmentInfo ailment: return ailment.Color;
+                default: return null;
+            }
+        }
+
+        /// <summary>0〜1想定の危険度。危険度の概念を持たないTargetはnull。</summary>
+        public static float? GetDangerLevel(object target)
+        {
+            switch (target)
+            {
+                case IEnemyInfo enemy: return enemy.DangerLevel;
+                case IIncomingAttackInfo attack: return attack.DangerLevel;
+                case IStatusAilmentInfo ailment: return ailment.DangerLevel;
+                default: return null;
+            }
+        }
+
+        public static GameObject GetGameObject(object target)
+        {
+            switch (target)
+            {
+                case CharacterUpdater character: return character.gameObject;
+                case IEnemyInfo enemy: return enemy.Transform != null ? enemy.Transform.gameObject : null;
+                case IBossInfo boss: return boss.Transform != null ? boss.Transform.gameObject : null;
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// 「あとどれくらいで手遅れになるか」を表す残り秒数。
+        /// 敵攻撃なら着弾までの時間、状態異常なら残り耐久時間。この概念を持たないTargetはnull。
+        /// </summary>
+        public static float? GetRemainingSeconds(object target)
+        {
+            switch (target)
+            {
+                case IIncomingAttackInfo attack: return attack.TimeToImpact;
+                case IStatusAilmentInfo ailment: return ailment.RemainingDuration;
+                default: return null;
+            }
+        }
+    }
+}

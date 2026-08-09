@@ -1,0 +1,35 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>Tank用「危険な攻撃を受けそうなプレイヤーへ移動」。同色の攻撃を受けそうな味方の近くへ寄る。</summary>
+    public class MoveToProtectEndangeredAllyAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToProtectEndangeredAlly";
+        public override float BaseWeight => 1f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, key: "ProtectAlly:IsTank"),
+            new DistanceConsideration("ProtectAlly:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "ProtectAlly:Sticky"),
+        };
+
+        // 攻撃の危険度/着弾時間/色一致は、味方自身ではなく「その味方に飛んでいる攻撃」側の情報のため、
+        // Considerationの汎用ターゲット解決に乗せず、ここでの候補列挙時点でスコアの土台として織り込む
+        // (危険な攻撃ほど、複数の脅威候補があるときに優先して選ばれるよう、危険度が高いものから返す)。
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks
+                .Where(attack => attack.TargetPlayer != null
+                                  && attack.TargetPlayer != context.Self
+                                  && attack.Color == context.SelfColor)
+                .OrderByDescending(attack => attack.DangerLevel)
+                .Select(attack => (object)attack.TargetPlayer)
+                .Distinct();
+        }
+    }
+}

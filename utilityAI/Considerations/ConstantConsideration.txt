@@ -1,0 +1,19 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// 常に固定値を返すだけのConsideration。IdleやWander等「他に良い選択肢が無いときの保険」となる
+    /// Actionのベースラインスコアを表現するために使う。
+    /// </summary>
+    public class ConstantConsideration : ConsiderationBase
+    {
+        private readonly float _value;
+
+        public ConstantConsideration(float value, string key = "Constant", float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _value = value;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target) => _value;
+    }
+}

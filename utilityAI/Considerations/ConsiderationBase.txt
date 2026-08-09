@@ -1,0 +1,34 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// IConsiderationの共通実装。「生の値を取り出す→曲線で0〜1へ変換→UtilityAIWeightTableの重みを掛ける」
+    /// という定型処理をここに集約し、個々のConsiderationはGetRawValue(とApplyCurveの必要時のみ)だけ書けばよい。
+    /// </summary>
+    public abstract class ConsiderationBase : IConsideration
+    {
+        public string Key { get; }
+        protected readonly float DefaultWeight;
+
+        protected ConsiderationBase(string key, float defaultWeight)
+        {
+            Key = key;
+            DefaultWeight = defaultWeight;
+        }
+
+        public float Score(UtilityContext context, object target)
+        {
+            float raw = GetRawValue(context, target);
+            float curved = ApplyCurve(Mathf.Clamp01(raw));
+            float weight = UtilityAIWeightTable.Resolve(context, Key, DefaultWeight);
+            return Mathf.Clamp01(curved * weight);
+        }
+
+        /// <summary>0〜1に正規化済みの生の値を返す。</summary>
+        protected abstract float GetRawValue(UtilityContext context, object target);
+
+        /// <summary>既定は恒等関数。応答曲線を変えたい場合だけoverrideする。</summary>
+        protected virtual float ApplyCurve(float normalizedRaw) => normalizedRaw;
+    }
+}

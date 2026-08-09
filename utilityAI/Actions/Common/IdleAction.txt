@@ -1,0 +1,30 @@
+using System.Collections.Generic;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 何もしない。他に意味のある選択肢が無いときの最終フォールバック。
+    /// 常に候補としては存在するが、スコアは低いベースライン値のみを持つ。
+    /// </summary>
+    public class IdleAction : IUtilityAction
+    {
+        public string Name => "Idle";
+        public float BaseWeight => 1f;
+        public bool IsUrgentCapable => false;
+
+        public IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new ConstantConsideration(0.15f, "Idle:Baseline"),
+        };
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            yield return null;
+        }
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            // 移動先を指定しない=NpcNavigationDriverがIdleCommandを出す。追加のコマンドも不要。
+        }
+    }
+}

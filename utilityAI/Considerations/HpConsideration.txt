@@ -1,0 +1,49 @@
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>誰のHPを見るか。Self=自分自身、Target=評価中のTarget(CharacterUpdaterの場合のみ有効)。</summary>
+    public enum HpSubject
+    {
+        Self,
+        Target,
+    }
+
+    /// <summary>
+    /// HP割合を評価するConsideration。
+    /// 例: 「HPが低い味方ほど優先して守る/回復したい」ならSubject=Target, invert=trueで低HPほど高スコアにする。
+    /// 「自分のHPが低いなら退避したい」ならSubject=Self, invert=trueにする。
+    /// </summary>
+    public class HpConsideration : ConsiderationBase
+    {
+        private readonly HpSubject _subject;
+        private readonly bool _invert;
+
+        public HpConsideration(string key, HpSubject subject, bool invert, float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _subject = subject;
+            _invert = invert;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            float ratio;
+
+            if (_subject == HpSubject.Self)
+            {
+                ratio = context.HpRatioOf(context.Self);
+            }
+            else if (target is CharacterUpdater character)
+            {
+                ratio = context.HpRatioOf(character);
+            }
+            else
+            {
+                return 0f; // HPを持たないTarget(敵/ボス/攻撃/状態異常そのもの等)にはHP評価は無関係
+            }
+
+            return _invert ? 1f - ratio : ratio;
+        }
+    }
+}

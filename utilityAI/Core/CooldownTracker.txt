@@ -1,0 +1,39 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// NPCごとの「行動名→再使用可能になる時刻」を保持する軽量クールダウン管理。
+    /// 実際のアビリティ実行システムはまだ無いため、Utility AI側がActionを実行した際に
+    /// 自己申告的にクールダウンを設定するだけの簡易実装(将来、実行結果を返す本物のアビリティ
+    /// システムに置き換わってもConsideration側のインターフェースは変わらない)。
+    /// </summary>
+    public class CooldownTracker
+    {
+        private readonly Dictionary<string, float> _readyAtByAction = new Dictionary<string, float>();
+
+        public void SetCooldown(string actionName, float durationSeconds)
+        {
+            if (durationSeconds <= 0f) return;
+            _readyAtByAction[actionName] = Time.time + durationSeconds;
+        }
+
+        public bool IsReady(string actionName)
+        {
+            return !_readyAtByAction.TryGetValue(actionName, out float readyAt) || Time.time >= readyAt;
+        }
+
+        /// <summary>0=たった今使ったばかり、1=準備完了。</summary>
+        public float GetReadyRatio(string actionName, float totalCooldown)
+        {
+            if (totalCooldown <= 0f) return 1f;
+            if (!_readyAtByAction.TryGetValue(actionName, out float readyAt)) return 1f;
+
+            float remaining = readyAt - Time.time;
+            if (remaining <= 0f) return 1f;
+
+            return 1f - Mathf.Clamp01(remaining / totalCooldown);
+        }
+    }
+}

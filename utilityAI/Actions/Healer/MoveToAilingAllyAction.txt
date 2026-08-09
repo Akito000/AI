@@ -1,0 +1,34 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Healer用「状態異常になっているプレイヤーへ移動」。同色の状態異常のうち、危険度の高いものを優先して近づく。
+    /// 「危険度の高い状態異常を優先」はここでの候補の並び順(危険度降順)と、Considerationの
+    /// DangerConsiderationの両方に自然に織り込まれている(候補が複数あればスコアの高い方が選ばれる)。
+    /// </summary>
+    public class MoveToAilingAllyAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToAilingAlly";
+        public override float BaseWeight => 1f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Healer, key: "MoveToAiling:IsHealer"),
+            new DistanceConsideration("MoveToAiling:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "MoveToAiling:Sticky"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Ailments
+                .Where(ailment => ailment.AffectedPlayer != null && ailment.Color == context.SelfColor)
+                .OrderByDescending(ailment => ailment.DangerLevel)
+                .Select(ailment => (object)ailment.AffectedPlayer)
+                .Distinct();
+        }
+    }
+}

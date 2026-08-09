@@ -1,0 +1,38 @@
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 「(必要ならTargetに対して)何らかのICommandを1つ発行したい」という形のActionの共通実装。
+    /// 弱攻撃・強攻撃・バリア・状態異常回復・ジョブ交換要求など、単発のコマンドを出すだけのActionはこれを継承する。
+    ///
+    /// クールダウンはCooldownSeconds &gt; 0ならAct()実行時に自動でcontext.Cooldowns.SetCooldownへ登録される。
+    /// これをConsiderations一覧に自分でCooldownReadyConsideration(Name, CooldownSeconds)として加えておけば、
+    /// 「使った直後は自動的にスコアが下がり選ばれにくくなる」を特別なif文無しで実現できる
+    /// (Think Intervalごとに再評価されるだけで、連射され続けることを防げる)。
+    /// </summary>
+    public abstract class UseAbilityActionBase : IUtilityAction
+    {
+        public abstract string Name { get; }
+        public abstract float BaseWeight { get; }
+        public virtual bool IsUrgentCapable => false;
+        public abstract IReadOnlyList<IConsideration> Considerations { get; }
+        public abstract IEnumerable<object> GetTargetCandidates(UtilityContext context);
+
+        /// <summary>0以下ならクールダウンを設定しない(何度でも選ばれ得る)。</summary>
+        protected virtual float CooldownSeconds => 0f;
+
+        protected abstract ICommand CreateCommand(UtilityContext context, object target);
+
+        public virtual void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            result.Commands.Add(CreateCommand(context, target));
+
+            if (CooldownSeconds > 0f)
+            {
+                context.Cooldowns.SetCooldown(Name, CooldownSeconds);
+            }
+        }
+    }
+}

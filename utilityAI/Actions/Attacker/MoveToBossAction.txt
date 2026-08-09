@@ -1,0 +1,29 @@
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「ボスへ移動」。ボスが攻撃可能な状態のとき、間合いに入っていなければ近づく。</summary>
+    public class MoveToBossAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToBoss";
+        public override float BaseWeight => 0.8f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "MoveToBoss:IsAttacker"),
+            // NeedToMoveはAttackBossAction側の間合い判定(MeleeRange)とは別に、もっと大きな接近スケールで
+            // 正規化する。同じ範囲を共有すると、Colliderに阻まれて間合いの奥まで到達できない大型の敵に対して
+            // 「まだ移動が必要」というスコアが下がりきらず、いつまでもMoveがAttackに勝ってしまう。
+            new DistanceConsideration("MoveToBoss:NeedToMove", AttackerTuning.SearchRadius, preferNear: false),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss != null && context.Boss.IsAlive && context.Boss.IsAttackable)
+            {
+                yield return context.Boss;
+            }
+        }
+    }
+}

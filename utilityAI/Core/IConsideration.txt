@@ -1,0 +1,18 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// Utility Scoreを構成する評価要素1つ分。HP・距離・色一致・危険度・着弾までの時間など、
+    /// 単一の観点だけを見て0〜1のスコアを返す。複数のConsiderationを組み合わせてActionのスコアを作る。
+    ///
+    /// 新しい判断材料を追加したくなったら、既存のActionやConsiderationを書き換えるのではなく、
+    /// このinterfaceを実装するConsiderationを1つ追加し、使いたいActionのConsiderations一覧に加えるだけでよい。
+    /// </summary>
+    public interface IConsideration
+    {
+        /// <summary>デバッグ表示やUtilityAIWeightTableでの重み上書きに使う一意な名前。</summary>
+        string Key { get; }
+
+        /// <summary>0〜1に正規化されたスコアを返す。targetはActionが評価中のTarget(不要ならnull)。</summary>
+        float Score(UtilityContext context, object target);
+    }
+}

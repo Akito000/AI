@@ -1,0 +1,38 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「移動」。特に理由が無いときに、少しだけその場をうろつく。
+    /// IdleActionよりわずかに基礎スコアを下げてあり、通常は他の意味のある行動に負ける
+    /// (何も無いときの見た目上の「待機モーション代わり」程度の位置づけ)。
+    /// </summary>
+    public class WanderMoveAction : MoveToTargetActionBase
+    {
+        public override string Name => "Wander";
+        public override float BaseWeight => 0.1f;
+
+        private const float WanderRadius = 3f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new ConstantConsideration(1f, "Wander:Baseline"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            Vector2 offset = Random.insideUnitCircle * WanderRadius;
+            Vector3 point = context.SelfPosition + new Vector3(offset.x, 0f, offset.y);
+            yield return (object)point;
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is Vector3 point)
+            {
+                result.MoveDestination = point;
+            }
+        }
+    }
+}

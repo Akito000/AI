@@ -1,0 +1,10 @@
+namespace Game.AI
+{
+    /// <summary>Healer系Actionで共有する数値。</summary>
+    internal static class HealerTuning
+    {
+        public const float CureRange = 4f;
+        public const float ReactionWindowSeconds = 4f;
+        public const float CureCooldown = 3f;
+    }
+}

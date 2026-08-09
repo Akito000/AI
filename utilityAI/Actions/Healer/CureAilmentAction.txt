@@ -1,0 +1,45 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Healer用「自分と同色の状態異常を回復」。間合いに入った同色の状態異常のうち、
+    /// 危険度が高く/残り時間が短いものほど優先して回復する。
+    /// 対象が誰もいなければ候補が空になり、共通行動(Idle/弱攻撃等)へ自然にフォールバックする
+    /// (「回復対象がいない場合は通常行動」を特別扱いせずに実現)。
+    /// </summary>
+    public class CureAilmentAction : UseAbilityActionBase
+    {
+        public override string Name => "CureAilment";
+        public override float BaseWeight => 1.5f;
+        public override bool IsUrgentCapable => true;
+
+        protected override float CooldownSeconds => HealerTuning.CureCooldown;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Healer, key: "Cure:IsHealer"),
+            new ColorMatchConsideration("Cure:ColorMatch"),
+            new DangerConsideration("Cure:Danger", easeIn: true),
+            new TimeToImpactConsideration(HealerTuning.ReactionWindowSeconds, "Cure:RemainingTime"),
+            new DistanceConsideration("Cure:InRange", HealerTuning.CureRange, preferNear: true),
+            new CooldownReadyConsideration("CureAilment", HealerTuning.CureCooldown),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Ailments
+                .Where(ailment => ailment.AffectedPlayer != null && ailment.Color == context.SelfColor)
+                .Cast<object>();
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            IStatusAilmentInfo ailment = (IStatusAilmentInfo)target;
+            return new SpecialActionCommand(ailment.AffectedPlayer.gameObject);
+        }
+    }
+}

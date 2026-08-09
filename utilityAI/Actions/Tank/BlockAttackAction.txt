@@ -1,0 +1,40 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Tank用「自分と同色の攻撃を防御」。自分自身が狙われている同色の攻撃を、その場で受け止める。
+    /// バリア(他プレイヤーを守る)とは違い、対象は常に自分なので基本的に移動を伴わない。
+    /// </summary>
+    public class BlockAttackAction : UseAbilityActionBase
+    {
+        public override string Name => "BlockAttack";
+        public override float BaseWeight => 1.7f;
+        public override bool IsUrgentCapable => true;
+
+        private const float CooldownDuration = 3f;
+        protected override float CooldownSeconds => CooldownDuration;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, key: "Block:IsTank"),
+            new ColorMatchConsideration("Block:ColorMatch"),
+            new DangerConsideration("Block:Danger", easeIn: true),
+            new TimeToImpactConsideration(TankTuning.ReactionWindowSeconds, "Block:TimeToImpact"),
+            new CooldownReadyConsideration("BlockAttack", CooldownDuration),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks.Where(a => a.TargetPlayer == context.Self).Cast<object>();
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new SpecialActionCommand(context.Self.gameObject);
+        }
+    }
+}

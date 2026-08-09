@@ -1,0 +1,55 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// NPCが今選んでいる行動をシーン上(頭上)に表示するための簡易デバッグ表示。
+    /// 外部アセットに依存せずに動くよう、実行時にTextMeshを1つ生成するだけの実装。
+    /// NpcThinkDriverが必要なNPCにだけ自動的にAddComponentする(Player操作のキャラクターには付かない)。
+    /// </summary>
+    public class NpcDebugLabel : MonoBehaviour
+    {
+        [SerializeField] private float heightOffset = 2.2f;
+        [SerializeField] private int fontSize = 32;
+        [SerializeField] private Color textColor = Color.yellow;
+
+        private TextMesh _textMesh;
+        private Camera _mainCamera;
+
+        private void Awake()
+        {
+            var labelObject = new GameObject("NpcDebugLabel_Text");
+            labelObject.transform.SetParent(transform, false);
+            labelObject.transform.localPosition = new Vector3(0f, heightOffset, 0f);
+
+            _textMesh = labelObject.AddComponent<TextMesh>();
+            _textMesh.characterSize = 0.12f;
+            _textMesh.fontSize = fontSize;
+            _textMesh.anchor = TextAnchor.LowerCenter;
+            _textMesh.alignment = TextAlignment.Center;
+            _textMesh.color = textColor;
+            _textMesh.text = string.Empty;
+        }
+
+        private void LateUpdate()
+        {
+            if (_textMesh == null) return;
+
+            if (_mainCamera == null)
+            {
+                _mainCamera = Camera.main;
+                if (_mainCamera == null) return;
+            }
+
+            _textMesh.transform.rotation = _mainCamera.transform.rotation;
+        }
+
+        public void SetText(string text)
+        {
+            if (_textMesh != null)
+            {
+                _textMesh.text = text;
+            }
+        }
+    }
+}

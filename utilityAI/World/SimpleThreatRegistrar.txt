@@ -1,0 +1,40 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace Game.World
+{
+    /// <summary>
+    /// シーン上のSimpleThreatMarkerをかき集めて、WorldQueryServiceへ敵/ボスとして登録するブリッジ。
+    /// シーンに1つ置いておけば、配置済み/新規追加されたSimpleThreatMarkerが自動的にUtility AIから見えるようになる。
+    /// 本格的な敵/ボス管理システムができたら、このクラスごと置き換えてIEnemyProvider/IBossProviderを
+    /// 実装したものをRegisterすればよく、AI側(Consideration/Action)の変更は不要。
+    /// </summary>
+    public class SimpleThreatRegistrar : MonoBehaviour, IEnemyProvider, IBossProvider
+    {
+        [SerializeField] private List<SimpleThreatMarker> markers = new List<SimpleThreatMarker>();
+        [Tooltip("Awake時にシーン内のSimpleThreatMarkerを自動で集める")]
+        [SerializeField] private bool autoFindOnAwake = true;
+
+        private void Awake()
+        {
+            if (autoFindOnAwake)
+            {
+                markers = FindObjectsByType<SimpleThreatMarker>(FindObjectsSortMode.None).ToList();
+            }
+
+            WorldQueryService.RegisterEnemyProvider(this);
+            WorldQueryService.RegisterBossProvider(this);
+        }
+
+        public IReadOnlyList<IEnemyInfo> GetActiveEnemies()
+        {
+            return markers.Where(m => m != null && m.ActAsEnemy).Cast<IEnemyInfo>().ToList();
+        }
+
+        public IBossInfo GetBoss()
+        {
+            return markers.FirstOrDefault(m => m != null && m.ActAsBoss);
+        }
+    }
+}

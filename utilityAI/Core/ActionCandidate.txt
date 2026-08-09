@@ -1,0 +1,19 @@
+namespace Game.AI
+{
+    /// <summary>Action×Targetの組み合わせ1件と、その評価結果。デバッグ表示にも使う。</summary>
+    public readonly struct ActionCandidate
+    {
+        public readonly IUtilityAction Action;
+        public readonly object Target;
+        public readonly float Score;
+        public readonly string DebugBreakdown;
+
+        public ActionCandidate(IUtilityAction action, object target, float score, string debugBreakdown)
+        {
+            Action = action;
+            Target = target;
+            Score = score;
+            DebugBreakdown = debugBreakdown;
+        }
+    }
+}

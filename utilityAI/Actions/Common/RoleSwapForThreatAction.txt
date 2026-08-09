@@ -1,0 +1,54 @@
+using System;
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「ジョブ切り替え」。
+    /// 「今のジョブでは対応できない/対応しづらい状況が起きていて、targetRoleになれば対応できる」ときに
+    /// スコアが上がる、汎用のジョブ交換Action。Attacker/Tank/Healerの3つとも同じ形で表現できるため、
+    /// クラスを3つ作らずコンストラクタ引数(どのロールへ/何を脅威とみなすか)だけを変えて使い回す。
+    ///
+    /// 例: 「自分と同じ色の敵攻撃が飛んできたら、今Tankでなくてもタンクへ交換を検討する」は、
+    /// targetRole=Tank, threatSelector=IncomingAttacksとして生成するだけで表現できる。
+    /// </summary>
+    public class RoleSwapForThreatAction : IUtilityAction
+    {
+        public string Name { get; }
+        public float BaseWeight { get; }
+        public bool IsUrgentCapable => true;
+        public IReadOnlyList<IConsideration> Considerations { get; }
+
+        private readonly RoleFlag _targetRole;
+        private readonly Func<UtilityContext, IEnumerable<object>> _threatSelector;
+
+        public RoleSwapForThreatAction(
+            string name,
+            RoleFlag targetRole,
+            float baseWeight,
+            float reactionWindowSeconds,
+            Func<UtilityContext, IEnumerable<object>> threatSelector)
+        {
+            Name = name;
+            _targetRole = targetRole;
+            BaseWeight = baseWeight;
+            _threatSelector = threatSelector;
+
+            Considerations = new IConsideration[]
+            {
+                new RoleGateConsideration(targetRole, invert: true, key: $"{name}:NotAlready"),
+                new ColorMatchConsideration($"{name}:ColorMatch"),
+                new DangerConsideration($"{name}:Danger", easeIn: true),
+                new TimeToImpactConsideration(reactionWindowSeconds, $"{name}:TimeToImpact"),
+            };
+        }
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context) => _threatSelector(context);
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            result.Commands.Add(new RoleSwapRequestCommand(_targetRole));
+        }
+    }
+}

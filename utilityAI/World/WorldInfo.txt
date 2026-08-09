@@ -1,0 +1,75 @@
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.World
+{
+    /// <summary>
+    /// 雑魚敵1体の、Utility AIが参照するために必要な最小限の読み取り専用情報。
+    /// 実際の敵システム(HP・AI・見た目等)を持つ具象クラスがこのinterfaceを実装する想定。
+    /// 現時点ではこのゲームに敵システムそのものが存在しないため、interfaceのみを用意する。
+    /// </summary>
+    public interface IEnemyInfo
+    {
+        Transform Transform { get; }
+        Vector3 Position { get; }
+        ColorType Color { get; }
+
+        /// <summary>0〜1想定。値が高いほど優先して対処すべき危険な敵。</summary>
+        float DangerLevel { get; }
+
+        bool IsAlive { get; }
+    }
+
+    /// <summary>
+    /// ボスの、Utility AIが参照するために必要な最小限の読み取り専用情報。
+    /// </summary>
+    public interface IBossInfo
+    {
+        Transform Transform { get; }
+        Vector3 Position { get; }
+        bool IsAlive { get; }
+
+        /// <summary>現在、攻撃(弱攻撃/強攻撃)を当てられる隙があるかどうか。</summary>
+        bool IsAttackable { get; }
+
+        /// <summary>ボスが現在使用中の攻撃(予告中も含む)。使用していなければnull。</summary>
+        IIncomingAttackInfo CurrentAttack { get; }
+    }
+
+    /// <summary>
+    /// 敵の攻撃1件(予告・進行中を問わない)の情報。Tankの「どの攻撃を防ぐべきか」判断の材料になる。
+    /// </summary>
+    public interface IIncomingAttackInfo
+    {
+        Vector3 Position { get; }
+
+        /// <summary>攻撃の効果範囲半径。</summary>
+        float Radius { get; }
+
+        ColorType Color { get; }
+
+        /// <summary>この攻撃の対象になっているプレイヤー。範囲攻撃等で特定の1人でない場合はnull。</summary>
+        CharacterUpdater TargetPlayer { get; }
+
+        /// <summary>0〜1想定。値が高いほど危険(被弾時のダメージが大きい等)。</summary>
+        float DangerLevel { get; }
+
+        /// <summary>着弾までの残り秒数。</summary>
+        float TimeToImpact { get; }
+    }
+
+    /// <summary>
+    /// プレイヤーにかかっている状態異常1件の情報。Healerの回復対象選定の材料になる。
+    /// </summary>
+    public interface IStatusAilmentInfo
+    {
+        CharacterUpdater AffectedPlayer { get; }
+        ColorType Color { get; }
+
+        /// <summary>放置した場合に残っている秒数(0に近いほど猶予がない)。</summary>
+        float RemainingDuration { get; }
+
+        /// <summary>0〜1想定。値が高いほど危険な状態異常。</summary>
+        float DangerLevel { get; }
+    }
+}

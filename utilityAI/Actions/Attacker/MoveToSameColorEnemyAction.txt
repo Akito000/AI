@@ -1,0 +1,30 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「同色の雑魚敵へ移動」。同色の雑魚敵のうち、間合い外にいる最有力候補へ近づく。</summary>
+    public class MoveToSameColorEnemyAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToSameColorEnemy";
+        public override float BaseWeight => 1f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "MoveToEnemy:IsAttacker"),
+            new ColorMatchConsideration("MoveToEnemy:ColorMatch"),
+            new DangerConsideration("MoveToEnemy:Danger"),
+            // AttackSameColorEnemyAction側の間合い判定(MeleeRange)とは別のスケールで正規化する
+            // (大型の敵はColliderに阻まれて間合いの奥まで到達できないことがあるため)。
+            new DistanceConsideration("MoveToEnemy:NeedToMove", AttackerTuning.SearchRadius, preferNear: false),
+            new DistanceConsideration("MoveToEnemy:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "MoveToEnemy:Sticky"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Enemies.Where(e => e.IsAlive).Cast<object>();
+        }
+    }
+}

@@ -1,0 +1,68 @@
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Consideration群のスコアを、Action+Target1件のUtility Scoreへ合成する。
+    ///
+    /// 単純な重み付き合計(Σ score×weight)ではなく、重み付き「補正付き乗算」を採用している。
+    /// 理由: 合計方式だと、例えば色が完全に不一致(本来スコア0であるべき)でも他の要素(危険度や距離)が
+    /// 高ければ合計スコアが押し上げられてしまい、「色が合わないと絶対に対応できない」というこのゲーム固有の
+    /// 絶対条件を表現できない。乗算であれば、1つでも0のConsiderationがあればAction全体のスコアも0になる
+    /// (AND条件として振る舞う)。ただし単純な総乗算はConsiderationの数が増えるほど値が急激に0へ収束してしまい、
+    /// 「Considerationを1個持つAction」と「5個持つAction」を公平に比較できなくなる。
+    /// そこでDave MarkのInfinite Axis Utility System(IAUS)で知られる補正項(compensation factor)を加え、
+    /// 平均的に妥当なスコアを持つ行動同士を、Consideration数に関わらず公平に比較できるようにしている。
+    /// </summary>
+    public static class UtilityScorer
+    {
+        public static ActionCandidate Evaluate(UtilityContext context, IUtilityAction action, object target, bool buildDebugBreakdown)
+        {
+            IReadOnlyList<IConsideration> considerations = action.Considerations;
+            int count = considerations.Count;
+            float weight = UtilityAIWeightTable.Resolve(context, action.Name, action.BaseWeight);
+
+            if (count == 0)
+            {
+                string onlyWeightBreakdown = buildDebugBreakdown ? $"{action.Name}: (No Considerations) weight={weight:F2}" : null;
+                return new ActionCandidate(action, target, weight, onlyWeightBreakdown);
+            }
+
+            StringBuilder breakdown = buildDebugBreakdown ? new StringBuilder(action.Name).Append(' ') : null;
+
+            float product = 1f;
+            for (int i = 0; i < count; i++)
+            {
+                IConsideration consideration = considerations[i];
+                float score = Mathf.Clamp01(consideration.Score(context, target));
+                breakdown?.Append(consideration.Key).Append('=').Append(score.ToString("F2")).Append(' ');
+
+                if (score <= 0f)
+                {
+                    product = 0f;
+                    break;
+                }
+
+                product *= score;
+            }
+
+            float finalScore;
+            if (product <= 0f)
+            {
+                finalScore = 0f;
+            }
+            else
+            {
+                float modificationFactor = 1f - (1f / count);
+                float makeUpValue = (1f - product) * modificationFactor;
+                float compensated = product + (makeUpValue * product);
+                finalScore = compensated * weight;
+            }
+
+            breakdown?.Append("=> final=").Append(finalScore.ToString("F3"));
+            return new ActionCandidate(action, target, finalScore, breakdown?.ToString());
+        }
+    }
+}

@@ -1,0 +1,34 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 自分からTargetまでの距離を評価するConsideration。
+    /// preferNear=trueなら近いほど高スコア(攻撃・回復・防御など「近づく/実行する」判断向き)、
+    /// preferNear=falseなら遠いほど高スコア(現状は主に「まだ距離があるので移動が必要」判断向きに使う想定)。
+    /// maxRelevantDistanceを超える距離は評価上「無関係(0扱いに近い/影響なし)」として飽和させる。
+    /// </summary>
+    public class DistanceConsideration : ConsiderationBase
+    {
+        private readonly float _maxRelevantDistance;
+        private readonly bool _preferNear;
+
+        public DistanceConsideration(string key, float maxRelevantDistance, bool preferNear, float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _maxRelevantDistance = Mathf.Max(0.01f, maxRelevantDistance);
+            _preferNear = preferNear;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            Vector3? position = TargetUtility.GetPosition(target);
+            if (position == null) return 0f;
+
+            float distance = context.DistanceTo(position.Value);
+            float t = ConsiderationCurves.Normalize(distance, 0f, _maxRelevantDistance);
+
+            return _preferNear ? ConsiderationCurves.InverseLinear(t) : ConsiderationCurves.Linear(t);
+        }
+    }
+}

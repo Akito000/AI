@@ -1,0 +1,97 @@
+using UnityEngine;
+using UnityEngine.AI;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Unityのnavigationシステム(NavMesh)を使った経路追従だけを担当する小さなヘルパー。
+    /// 実際にキャラクターを動かすことはせず、「今フレーム、どの方向へ進めばよいか」という
+    /// 方向ベクトルを返すだけにとどめる。AIがNavMeshAgentを直接持って位置やIsStopped等を
+    /// 細かく操作することは避け、実際の移動は既存のMoveDriverにMoveCommand(方向)として渡す。
+    /// 経路の再計算(NavMesh.CalculatePath)は目的地が変わった/一定時間経ったときだけ行い、
+    /// 毎フレームの重い処理を避ける。
+    /// </summary>
+    public class NpcNavMeshMover
+    {
+        private const float RepathIntervalSeconds = 0.3f;
+        private const float RepathDistanceThreshold = 0.75f;
+        private const float ArriveRadius = 0.6f;
+        private const float CornerAdvanceRadius = 0.4f;
+
+        private readonly NavMeshPath _path = new NavMeshPath();
+        private Vector3? _lastPathedDestination;
+        private float _nextRepathTime;
+        private int _cornerIndex;
+
+        /// <summary>目的地への方向(XZ、正規化済み)を返す。到着済み/目的地なしならVector2.zero。</summary>
+        public Vector2 GetMoveDirection(Vector3 currentPosition, Vector3? destination)
+        {
+            if (destination == null)
+            {
+                _lastPathedDestination = null;
+                return Vector2.zero;
+            }
+
+            Vector3 dest = destination.Value;
+
+            if (HorizontalDistance(currentPosition, dest) <= ArriveRadius)
+            {
+                return Vector2.zero;
+            }
+
+            bool needsRepath = _lastPathedDestination == null
+                                || Time.time >= _nextRepathTime
+                                || HorizontalDistance(_lastPathedDestination.Value, dest) > RepathDistanceThreshold;
+
+            if (needsRepath)
+            {
+                Repath(currentPosition, dest);
+            }
+
+            if (_path.corners.Length == 0)
+            {
+                // NavMesh上で経路が見つからない場合は直接目的地へ向かうフォールバック
+                return DirectionToXZ(currentPosition, dest);
+            }
+
+            // NavMeshは高さ方向にキャラクターのpivotとズレることがある(地面のNavMesh面高さ ≠ キャラクターのY)。
+            // 到達判定・方向計算は移動に関係するXZ平面だけで行い、Y差でコーナーに永遠に到達しない事故を防ぐ。
+            while (_cornerIndex < _path.corners.Length - 1 &&
+                   HorizontalDistance(currentPosition, _path.corners[_cornerIndex]) <= CornerAdvanceRadius)
+            {
+                _cornerIndex++;
+            }
+
+            Vector3 targetCorner = _path.corners[Mathf.Min(_cornerIndex, _path.corners.Length - 1)];
+            return DirectionToXZ(currentPosition, targetCorner);
+        }
+
+        private void Repath(Vector3 from, Vector3 to)
+        {
+            _lastPathedDestination = to;
+            _nextRepathTime = Time.time + RepathIntervalSeconds;
+            _cornerIndex = 0;
+
+            if (!NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _path))
+            {
+                _path.ClearCorners();
+            }
+        }
+
+        private static float HorizontalDistance(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
+        private static Vector2 DirectionToXZ(Vector3 from, Vector3 to)
+        {
+            Vector3 diff = to - from;
+            diff.y = 0f;
+            if (diff.sqrMagnitude < 0.0001f) return Vector2.zero;
+            Vector3 n = diff.normalized;
+            return new Vector2(n.x, n.z);
+        }
+    }
+}

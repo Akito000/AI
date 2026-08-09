@@ -1,0 +1,28 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// Target(敵/敵攻撃/状態異常)が持つ危険度(0〜1)をそのままスコアへ反映するConsideration。
+    /// 危険度の概念を持たないTargetを渡した場合は中立値(0.5)を返す。
+    /// </summary>
+    public class DangerConsideration : ConsiderationBase
+    {
+        private readonly bool _easeIn;
+
+        /// <param name="easeIn">true: 危険度が低いうちはあまり気にせず、高くなるほど急激にスコアが伸びる(EaseIn曲線)。</param>
+        public DangerConsideration(string key = "Danger", bool easeIn = false, float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _easeIn = easeIn;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            return TargetUtility.GetDangerLevel(target) ?? 0.5f;
+        }
+
+        protected override float ApplyCurve(float normalizedRaw)
+        {
+            return _easeIn ? ConsiderationCurves.QuadraticEaseIn(normalizedRaw) : normalizedRaw;
+        }
+    }
+}

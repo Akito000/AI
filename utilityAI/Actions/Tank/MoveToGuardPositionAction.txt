@@ -1,0 +1,49 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Tank用「味方を守れる位置へ移動」。差し迫った脅威が無いときの平時のポジショニング。
+    /// ボスと味方の中間あたりへ寄っておくことで、次に危険な攻撃が来たときに反応しやすい位置を維持する。
+    /// 基礎重要度を低くしてあり、緊急の防御/バリア/迎撃系Actionに常に道を譲る。
+    /// </summary>
+    public class MoveToGuardPositionAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToGuardPosition";
+        public override float BaseWeight => 0.4f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, key: "GuardPosition:IsTank"),
+            new DistanceConsideration("GuardPosition:NeedToMove", TankTuning.GuardPositionArriveRadius, preferNear: false),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss == null || !context.Boss.IsAlive) yield break;
+
+            Vector3 alliesCenter = context.SelfPosition;
+            int count = 0;
+            foreach (CharacterUpdater ally in context.Allies)
+            {
+                alliesCenter += ally.transform.position;
+                count++;
+            }
+            alliesCenter /= (count + 1);
+
+            // ボス寄り7割・味方の重心3割の位置を「守れる位置」の目安にする。
+            Vector3 guardPoint = Vector3.Lerp(alliesCenter, context.Boss.Position, 0.7f);
+            yield return (object)guardPoint;
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is Vector3 point)
+            {
+                result.MoveDestination = point;
+            }
+        }
+    }
+}

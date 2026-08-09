@@ -1,0 +1,42 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Considerationでよく使う応答曲線(0〜1に正規化した入力を0〜1のスコアへ変換する)を集めたヘルパー。
+    /// AnimationCurveアセットを都度作らずに済むよう、代表的な形だけをコードで用意している
+    /// (UtilityAIWeightTableで数値だけは調整できるので、形自体を頻繁に変える想定は薄い)。
+    /// </summary>
+    public static class ConsiderationCurves
+    {
+        /// <summary>そのまま線形。0→0, 1→1。</summary>
+        public static float Linear(float t) => Mathf.Clamp01(t);
+
+        /// <summary>反転線形。0→1, 1→0(例: 距離が近いほど高スコア)。</summary>
+        public static float InverseLinear(float t) => 1f - Mathf.Clamp01(t);
+
+        /// <summary>下に凸(序盤は緩やか、終盤に急上昇)。「ギリギリまでは気にしない」表現向き。</summary>
+        public static float QuadraticEaseIn(float t)
+        {
+            float c = Mathf.Clamp01(t);
+            return c * c;
+        }
+
+        /// <summary>上に凸(序盤に急上昇、終盤は緩やか)。「少しでも該当すれば即座に反応したい」表現向き。</summary>
+        public static float QuadraticEaseOut(float t)
+        {
+            float c = Mathf.Clamp01(t);
+            return 1f - (1f - c) * (1f - c);
+        }
+
+        /// <summary>閾値未満は0、以上は1。明確な足切りに使う。</summary>
+        public static float Threshold(float t, float threshold) => t >= threshold ? 1f : 0f;
+
+        /// <summary>[from, to]の範囲を0〜1に正規化する(from&gt;toの反転にも対応)。</summary>
+        public static float Normalize(float value, float from, float to)
+        {
+            if (Mathf.Approximately(from, to)) return value >= to ? 1f : 0f;
+            return Mathf.Clamp01((value - from) / (to - from));
+        }
+    }
+}

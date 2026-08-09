@@ -1,0 +1,29 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 「Targetの位置へ移動したい」という形のActionの共通実装。
+    /// Act()は移動先(result.MoveDestination)を書き込むだけで、実際の経路追従は
+    /// NpcNavigationDriverが毎フレーム別途行う(意思決定と移動実行の責務分離)。
+    /// GetTargetCandidates/Considerationsだけを実装すれば新しい「〜へ移動」Actionを追加できる。
+    /// </summary>
+    public abstract class MoveToTargetActionBase : IUtilityAction
+    {
+        public abstract string Name { get; }
+        public abstract float BaseWeight { get; }
+        public virtual bool IsUrgentCapable => false;
+        public abstract IReadOnlyList<IConsideration> Considerations { get; }
+        public abstract IEnumerable<object> GetTargetCandidates(UtilityContext context);
+
+        public virtual void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            Vector3? position = TargetUtility.GetPosition(target);
+            if (position.HasValue)
+            {
+                result.MoveDestination = position.Value;
+            }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 全ジョブ共通の弱攻撃。
+    ///
+    /// 前提: 仕様書は「Attacker: 自分と同じ色属性の敵を倒すことができる」等、色制限をジョブ固有アクション
+    /// (強攻撃/バリア/状態異常回復)の説明として記載しており、「全プレイヤー共通の弱攻撃」には
+    /// 色制限の記載が無い。そのため本実装では弱攻撃は色を問わず当てられるものとして扱う
+    /// (チップダメージ用の共通アクション、トドメ/本命はジョブ固有の色制限アクションという設計)。
+    /// この解釈を変えたい場合はConsiderationsにColorMatchConsiderationを1行追加するだけでよい。
+    /// </summary>
+    public class WeakAttackAction : UseAbilityActionBase
+    {
+        public override string Name => "WeakAttack";
+        public override float BaseWeight => 0.9f;
+
+        private const float AttackRange = 2.5f;
+        private const float CooldownDuration = 1.2f;
+
+        protected override float CooldownSeconds => CooldownDuration;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new DistanceConsideration("WeakAttack:Distance", AttackRange, preferNear: true),
+            new CooldownReadyConsideration("WeakAttack", CooldownDuration),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            IEnumerable<object> enemies = context.Enemies.Where(e => e.IsAlive).Cast<object>();
+            if (context.Boss != null && context.Boss.IsAlive && context.Boss.IsAttackable)
+            {
+                return enemies.Append(context.Boss);
+            }
+            return enemies;
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new WeakAttackCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}

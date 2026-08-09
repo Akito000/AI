@@ -1,0 +1,26 @@
+namespace Game.AI
+{
+    /// <summary>
+    /// 指定したAction名のクールダウンがどれだけ回復しているかを評価するConsideration。
+    /// 使用可能(クールダウン0)なら1、使った直後なら0に近い値になる。
+    /// これを付けたActionは、実行中に自分自身でcontext.Cooldowns.SetCooldown(actionName, duration)を
+    /// 呼んでおくことで、次のThinkから自動的にスコアが下がり「使ったばかりの行動」を選びにくくなる。
+    /// </summary>
+    public class CooldownReadyConsideration : ConsiderationBase
+    {
+        private readonly string _actionName;
+        private readonly float _totalCooldownSeconds;
+
+        public CooldownReadyConsideration(string actionName, float totalCooldownSeconds, float defaultWeight = 1f)
+            : base($"Cooldown:{actionName}", defaultWeight)
+        {
+            _actionName = actionName;
+            _totalCooldownSeconds = totalCooldownSeconds;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            return context.Cooldowns.GetReadyRatio(_actionName, _totalCooldownSeconds);
+        }
+    }
+}

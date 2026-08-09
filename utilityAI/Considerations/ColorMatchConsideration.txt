@@ -1,0 +1,26 @@
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 自分の色属性とTargetの色属性が一致しているかを評価するConsideration。
+    /// このゲームでは「色が合わない相手には対応できない」という絶対条件があるため、
+    /// 基本的には一致=1、不一致=0の二値(ゲート)として扱う。
+    /// UtilityScorerが乗算合成のため、0が1件でもあればAction全体のスコアも0になり、
+    /// 「色が合わなければ絶対にこの行動は選ばれない」というルールを自然に表現できる。
+    /// </summary>
+    public class ColorMatchConsideration : ConsiderationBase
+    {
+        public ColorMatchConsideration(string key = "ColorMatch", float defaultWeight = 1f) : base(key, defaultWeight)
+        {
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            ColorType? targetColor = TargetUtility.GetColor(target);
+            if (targetColor == null || targetColor == ColorType.None) return 1f; // 色属性を持たない/無色は常に対応可能
+
+            return targetColor == context.SelfColor ? 1f : 0f;
+        }
+    }
+}

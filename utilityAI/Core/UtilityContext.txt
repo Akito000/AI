@@ -1,0 +1,84 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Utility AIが1回の思考(Think)で参照する状況のスナップショット。
+    /// 毎Think Intervalごとに1つ作られ、その回のAction×Target評価すべてに使い回される。
+    /// </summary>
+    public class UtilityContext
+    {
+        public CharacterUpdater Self { get; }
+        public DamageDriver SelfDamage { get; }
+        public RoleFlag SelfRole { get; }
+        public ColorType SelfColor { get; }
+        public Vector3 SelfPosition { get; }
+
+        /// <summary>自分以外の3プレイヤー(Player/NPC問わず)。</summary>
+        public IReadOnlyList<CharacterUpdater> Allies { get; }
+
+        public IReadOnlyList<IEnemyInfo> Enemies { get; }
+        public IBossInfo Boss { get; }
+        public IReadOnlyList<IIncomingAttackInfo> IncomingAttacks { get; }
+        public IReadOnlyList<IStatusAilmentInfo> Ailments { get; }
+
+        /// <summary>直前のThinkで選ばれていたTarget(ハンチング防止のヒステリシス等に使う)。</summary>
+        public object PreviousTarget { get; }
+
+        /// <summary>直前のThinkで選ばれていたAction名。</summary>
+        public string PreviousActionName { get; }
+
+        public CooldownTracker Cooldowns { get; }
+        public UtilityAIWeightTable WeightTable { get; }
+        public float Now { get; }
+
+        public UtilityContext(
+            CharacterUpdater self,
+            DamageDriver selfDamage,
+            IReadOnlyList<CharacterUpdater> allMembers,
+            object previousTarget,
+            string previousActionName,
+            CooldownTracker cooldowns,
+            UtilityAIWeightTable weightTable)
+        {
+            Self = self;
+            SelfDamage = selfDamage;
+            SelfRole = RoleSwapService.GetPrimaryRole(self);
+            SelfColor = self.Color;
+            SelfPosition = self.transform.position;
+
+            var allies = new List<CharacterUpdater>(allMembers?.Count ?? 0);
+            if (allMembers != null)
+            {
+                for (int i = 0; i < allMembers.Count; i++)
+                {
+                    if (allMembers[i] != null && allMembers[i] != self) allies.Add(allMembers[i]);
+                }
+            }
+            Allies = allies;
+
+            Enemies = WorldQueryService.GetActiveEnemies();
+            Boss = WorldQueryService.GetBoss();
+            IncomingAttacks = WorldQueryService.GetIncomingAttacks();
+            Ailments = WorldQueryService.GetActiveAilments();
+
+            PreviousTarget = previousTarget;
+            PreviousActionName = previousActionName;
+            Cooldowns = cooldowns;
+            WeightTable = weightTable;
+            Now = Time.time;
+        }
+
+        public float DistanceTo(Vector3 position) => Vector3.Distance(SelfPosition, position);
+
+        public float HpRatioOf(CharacterUpdater character)
+        {
+            DamageDriver damage = character == Self ? SelfDamage : character.GetDriver<DamageDriver>();
+            if (damage == null || damage.MaxHp <= 0f) return 1f;
+            return Mathf.Clamp01(damage.CurrentHp / damage.MaxHp);
+        }
+    }
+}
