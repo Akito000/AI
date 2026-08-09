@@ -1,0 +1,93 @@
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// キャラクターへの入力の「意図」を表すだけのマーカー。
+    /// 実際にどう処理するかは各Driver(MoveDriver等)が判断する。
+    /// </summary>
+    public interface ICommand
+    {
+    }
+
+    /// <summary>指定した方向へ移動したいという意図。</summary>
+    public class MoveCommand : ICommand
+    {
+        public Vector2 Direction { get; }
+
+        public MoveCommand(Vector2 direction)
+        {
+            Direction = direction;
+        }
+    }
+
+    /// <summary>移動入力なし、という意図。毎回newしなくて済むようにシングルトン化。</summary>
+    public class IdleCommand : ICommand
+    {
+        public static readonly IdleCommand Instance = new IdleCommand();
+        private IdleCommand() { }
+    }
+
+    /// <summary>
+    /// 全ジョブ共通の弱攻撃を使いたいという意図。
+    /// Targetは任意(nullなら対象未選定)。Player入力は現状Target選定手段が無いためnullで発行する。
+    /// </summary>
+    public class WeakAttackCommand : ICommand
+    {
+        /// <summary>Target無し版のシングルトン。毎回newしなくて済むように用意。</summary>
+        public static readonly WeakAttackCommand Instance = new WeakAttackCommand(null);
+
+        public GameObject Target { get; }
+
+        public WeakAttackCommand(GameObject target)
+        {
+            Target = target;
+        }
+    }
+
+    /// <summary>
+    /// ジョブ固有の特殊アクション(マウス左クリック / ゲームパッドYボタン)を使いたいという意図。
+    /// 役割(Attacker/Tank/Healer)によって、これを見て何をするかが変わる
+    /// (AttackDriver=強攻撃 / TankDriver=バリア / HealDriver=状態異常回復として、それぞれ自分の役割の時だけ反応する)。
+    /// Targetは任意(nullなら対象未選定)。Player入力は現状Target選定手段が無いためInstance(Target=null)で発行する。
+    /// </summary>
+    public class SpecialActionCommand : ICommand
+    {
+        /// <summary>Target無し版のシングルトン。毎回newしなくて済むように用意。</summary>
+        public static readonly SpecialActionCommand Instance = new SpecialActionCommand(null);
+
+        public GameObject Target { get; }
+
+        public SpecialActionCommand(GameObject target)
+        {
+            Target = target;
+        }
+    }
+
+    /// <summary>
+    /// 役割変え(スペースキー / ゲームパッドAボタン)をしたいという意図。
+    /// RoleDriverが検知し、Attacker→Tank→Healer→Attacker...の順で「次の役割」を1つ進める形で
+    /// RoleSwapService.RequestRoleを呼び出す(実体は現在その役割を持つ相手との入れ替え)。
+    /// </summary>
+    public class RoleChangeCommand : ICommand
+    {
+        public static readonly RoleChangeCommand Instance = new RoleChangeCommand();
+        private RoleChangeCommand() { }
+    }
+
+    /// <summary>
+    /// 特定の役割へ変えたいという意図。NPCのUtility AIが「今Tankになるべき」等、
+    /// 狙った役割をピンポイントで要求する場合に使う(Player用のRoleChangeCommandとは違い、
+    /// サイクルを進めるのではなく直接目的の役割を指定する)。
+    /// RoleDriverが検知し、RoleSwapService.RequestRoleへそのまま渡す。
+    /// </summary>
+    public class RoleSwapRequestCommand : ICommand
+    {
+        public RoleFlag TargetRole { get; }
+
+        public RoleSwapRequestCommand(RoleFlag targetRole)
+        {
+            TargetRole = targetRole;
+        }
+    }
+}
