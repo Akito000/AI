@@ -1,0 +1,79 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.DangerEffect
+{
+    /// <summary>1件の脅威(攻撃予告)を表す小さなデータ。DangerEffectTargetStateのスタックの1要素。</summary>
+    internal readonly struct DangerEffectThreat
+    {
+        public readonly DangerEffectHandle _Handle;
+        public readonly Color _Color;
+
+        public DangerEffectThreat(DangerEffectHandle handle, Color color)
+        {
+            _Handle = handle;
+            _Color = color;
+        }
+    }
+
+    /// <summary>
+    /// 1つの表示スロット(固定座標1件、またはキャラクター1人分)に対して、
+    /// 現在どの攻撃予告(脅威)がそこを狙っているかをスタックで管理するクラス。
+    ///
+    /// 「今何色で表示すべきか」の判断だけを担当し、実際の表示・追従はDangerEffectView(MonoBehaviour)に任せる。
+    /// 同じキャラクターが複数の攻撃から同時に狙われた場合、後から追加された方を優先して表示し、
+    /// それがhideされたら1つ前の脅威の色へ巻き戻る(スタック方式)。全部消えたらスロット自体が不要になる。
+    /// </summary>
+    public class DangerEffectTargetState
+    {
+        private readonly List<DangerEffectThreat> _ThreatStack = new List<DangerEffectThreat>();
+
+        /// <summary>このスロットが表示に使っているView。</summary>
+        public DangerEffectView _View { get; }
+
+        public DangerEffectTargetState(DangerEffectView view)
+        {
+            _View = view;
+        }
+
+        /// <summary>脅威を1つ積む。積んだ直後の色が最新の表示色になる。</summary>
+        public void pushThreat(DangerEffectHandle handle, Color color)
+        {
+            _ThreatStack.Add(new DangerEffectThreat(handle, color));
+            applyTopColor();
+        }
+
+        /// <summary>
+        /// 指定したハンドルの脅威を取り除く。
+        /// 一番上(最新)が消えた場合は1つ前の色へ巻き戻る。
+        /// スタックが空になった場合はtrueを返すので、呼び出し側(Manager)はこのスロット自体を破棄すること。
+        /// </summary>
+        public bool popThreat(DangerEffectHandle handle)
+        {
+            for (int i = _ThreatStack.Count - 1; i >= 0; i--)
+            {
+                if (_ThreatStack[i]._Handle.Equals(handle))
+                {
+                    _ThreatStack.RemoveAt(i);
+                    break;
+                }
+            }
+
+            if (_ThreatStack.Count == 0)
+            {
+                return true;
+            }
+
+            applyTopColor();
+            return false;
+        }
+
+        /// <summary>今表示すべき色(スタックの一番上)をViewへ反映する。</summary>
+        private void applyTopColor()
+        {
+            if (_ThreatStack.Count == 0 || _View == null) return;
+            Color topColor = _ThreatStack[_ThreatStack.Count - 1]._Color;
+            _View.setColor(topColor);
+        }
+    }
+}

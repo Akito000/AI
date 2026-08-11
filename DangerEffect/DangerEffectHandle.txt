@@ -1,0 +1,33 @@
+using System;
+
+namespace Game.DangerEffect
+{
+    /// <summary>
+    /// 攻撃予告1件を識別するためのハンドル。
+    /// show()/showFollow()の戻り値として発行され、hide()に渡すことでその1件だけを個別に削除できる。
+    /// 中身はただの連番IDで、値そのものに意味は無い(比較・識別だけに使う)。
+    /// </summary>
+    public readonly struct DangerEffectHandle : IEquatable<DangerEffectHandle>
+    {
+        private readonly int _Id;
+
+        public DangerEffectHandle(int id)
+        {
+            _Id = id;
+        }
+
+        /// <summary>何にも紐付いていない無効なハンドルかどうか。</summary>
+        public bool isValid()
+        {
+            return _Id != 0;
+        }
+
+        public bool Equals(DangerEffectHandle other) => _Id == other._Id;
+        public override bool Equals(object obj) => obj is DangerEffectHandle other && Equals(other);
+        public override int GetHashCode() => _Id;
+        public override string ToString() => $"DangerEffectHandle({_Id})";
+
+        /// <summary>show/showFollowが失敗した場合等に返す無効値。</summary>
+        public static readonly DangerEffectHandle Invalid = new DangerEffectHandle(0);
+    }
+}

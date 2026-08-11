@@ -1,0 +1,109 @@
+using System;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.DangerEffect
+{
+    /// <summary>
+    /// 攻撃予告1表示分の「見た目」だけを担当するMonoBehaviour。
+    /// 色の変更、固定座標/キャラクター追従の位置更新のみを行う。
+    /// 「今どの色を出すべきか」というスタック管理はDangerEffectTargetStateの責務なので、
+    /// このクラスは言われた通りに表示するだけの単純な役割にとどめる。
+    /// </summary>
+    public class DangerEffectView : MonoBehaviour
+    {
+        [Tooltip("キャラクター追従時、足元からどれだけ上にずらして表示するか(地面とのZファイティング防止)")]
+        [SerializeField] private float _FootOffsetY = 0.05f;
+
+        private Renderer _Renderer;
+        private Material _MaterialInstance;
+
+        private CharacterUpdater _TargetCharacter;
+        private bool _IsFollowMode;
+        private bool _HasNotifiedLost;
+
+        /// <summary>追従中のキャラクターがDestroyされて見失ったときに1度だけ呼ばれる。</summary>
+        public event Action<DangerEffectView> _OnTargetLost;
+
+        private void Awake()
+        {
+            // 子オブジェクトも含めて描画用のRendererを探す(Plane直付け/子構成のどちらでも対応できるように)
+            _Renderer = GetComponentInChildren<Renderer>();
+            if (_Renderer != null)
+            {
+                // sharedMaterialではなくmaterialを取ることで自動的にインスタンス化し、
+                // 他の攻撃予告と色が連動してしまわないようにする
+                _MaterialInstance = _Renderer.material;
+            }
+        }
+
+        /// <summary>固定座標へ表示する初期化(落石など、位置が動かない攻撃予告用)。</summary>
+        public void setupFixed(vec3 position)
+        {
+            _IsFollowMode = false;
+            _TargetCharacter = null;
+            transform.position = position;
+        }
+
+        /// <summary>指定キャラクターの足元へ表示し、以後追従させる初期化。</summary>
+        public void setupFollow(CharacterUpdater character)
+        {
+            _IsFollowMode = true;
+            _TargetCharacter = character;
+            _HasNotifiedLost = false;
+            updateFollowPosition();
+        }
+
+        /// <summary>表示色を変更する。</summary>
+        public void setColor(Color color)
+        {
+            if (_MaterialInstance == null) return;
+
+            // URP(Lit/Unlit)は_BaseColor、Built-in RPは_Colorとプロパティ名が異なるため、
+            // どちらのシェーダーでも色が反映されるように両対応しておく。
+            if (_MaterialInstance.HasProperty("_BaseColor"))
+            {
+                _MaterialInstance.SetColor("_BaseColor", color);
+            }
+            else if (_MaterialInstance.HasProperty("_Color"))
+            {
+                _MaterialInstance.SetColor("_Color", color);
+            }
+        }
+
+        private void Update()
+        {
+            if (!_IsFollowMode) return;
+
+            // キャラクターがDestroyされていてもUnityの==nullオーバーロードでここに入るだけで例外にはならない
+            if (_TargetCharacter == null)
+            {
+                if (!_HasNotifiedLost)
+                {
+                    _HasNotifiedLost = true;
+                    _OnTargetLost?.Invoke(this);
+                }
+                return;
+            }
+
+            updateFollowPosition();
+        }
+
+        private void updateFollowPosition()
+        {
+            vec3 anchorPosition = getAnchorPosition(_TargetCharacter);
+            anchorPosition.y += _FootOffsetY;
+            transform.position = anchorPosition;
+        }
+
+        /// <summary>
+        /// キャラクターの「足元」とみなす座標を取得する。
+        /// 現状はTransform.positionをそのまま使うが、将来キャラクター側に専用のWarningAnchor等の
+        /// Transformを持たせたくなった場合はこの1箇所だけ差し替えれば済むようにしてある。
+        /// </summary>
+        private static vec3 getAnchorPosition(CharacterUpdater character)
+        {
+            return character.transform.position;
+        }
+    }
+}

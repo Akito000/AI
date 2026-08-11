@@ -1,0 +1,209 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.DangerEffect
+{
+    /// <summary>
+    /// 攻撃予告(DangerEffect)を一括管理するシングルトン。
+    /// 攻撃側のコードはshow/showFollow/hideの3つだけを呼べばよく、
+    /// 「同じキャラクターを複数の攻撃が同時に狙っている場合にどう表示を切り替えるか」等の
+    /// 内部事情はすべてこのManagerとDangerEffectTargetStateの中に隠蔽してある。
+    /// </summary>
+    public class DangerEffectManager : MonoBehaviour
+    {
+        public static DangerEffectManager Instance { get; private set; }
+
+        [Tooltip("攻撃予告として生成するPrefab(DangerEffectViewが付いたPlane等)")]
+        [SerializeField] private DangerEffectView _WarningPrefab;
+
+        [Tooltip("生成した攻撃予告オブジェクトをまとめる親。未指定ならこのオブジェクト直下に生成する")]
+        [SerializeField] private Transform _Container;
+
+        // ハンドル発行用の連番。0はDangerEffectHandle.Invalid用に予約しているので1から始める。
+        private int _NextHandleId = 1;
+
+        // ハンドル→そのハンドルが属しているスロットの対応。hide()を素早く処理するために持つ。
+        private readonly Dictionary<DangerEffectHandle, DangerEffectTargetState> _HandleToState =
+            new Dictionary<DangerEffectHandle, DangerEffectTargetState>();
+
+        // キャラクター追従型は同じキャラクターなら同じスロットへまとめる(色の上書き/巻き戻し対象)。
+        private readonly Dictionary<CharacterUpdater, DangerEffectTargetState> _CharacterToState =
+            new Dictionary<CharacterUpdater, DangerEffectTargetState>();
+
+        /// <summary>デバッグ用。現在有効なハンドル数(=論理的に表示中の攻撃予告の延べ数)。</summary>
+        public int DebugActiveHandleCount => _HandleToState.Count;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
+
+        /// <summary>
+        /// 固定座標へ攻撃予告を表示する。落石など、攻撃位置があらかじめ決まっている場合に使う。
+        /// </summary>
+        public DangerEffectHandle show(vec3 position, Color color)
+        {
+            DangerEffectView view = createView();
+            if (view == null) return DangerEffectHandle.Invalid;
+
+            view.setupFixed(position);
+
+            DangerEffectTargetState state = new DangerEffectTargetState(view);
+            DangerEffectHandle handle = issueHandle();
+            state.pushThreat(handle, color);
+
+            _HandleToState[handle] = state;
+            return handle;
+        }
+
+        /// <summary>
+        /// 指定キャラクターの足元へ攻撃予告を表示し、そのキャラクターの移動に追従させる。
+        /// 同じキャラクターに対して既に別の攻撃予告が表示中の場合は、
+        /// 新しい方の色を優先して上書き表示する(古い方はhideされるまで内部で保持され続ける)。
+        /// </summary>
+        public DangerEffectHandle showFollow(CharacterUpdater character, Color color)
+        {
+            if (character == null)
+            {
+                Debug.LogWarning("[DangerEffectManager] showFollow: character が null のため無視しました。");
+                return DangerEffectHandle.Invalid;
+            }
+
+            if (!_CharacterToState.TryGetValue(character, out DangerEffectTargetState state))
+            {
+                DangerEffectView view = createView();
+                if (view == null) return DangerEffectHandle.Invalid;
+
+                view.setupFollow(character);
+                view._OnTargetLost += onViewTargetLost;
+
+                state = new DangerEffectTargetState(view);
+                _CharacterToState[character] = state;
+            }
+
+            DangerEffectHandle handle = issueHandle();
+            state.pushThreat(handle, color);
+
+            _HandleToState[handle] = state;
+            return handle;
+        }
+
+        /// <summary>
+        /// 指定した攻撃予告を1件だけ削除する。
+        /// 同じスロットに他の攻撃予告がまだ残っていれば、表示はそちらの色へ巻き戻るだけで消えない。
+        /// 全て無くなった時点で初めて表示オブジェクトが破棄される。
+        /// </summary>
+        public void hide(DangerEffectHandle handle)
+        {
+            if (!handle.isValid()) return;
+            if (!_HandleToState.TryGetValue(handle, out DangerEffectTargetState state)) return;
+
+            _HandleToState.Remove(handle);
+
+            bool isSlotEmpty = state.popThreat(handle);
+            if (isSlotEmpty)
+            {
+                destroyState(state);
+            }
+        }
+
+        private DangerEffectHandle issueHandle()
+        {
+            return new DangerEffectHandle(_NextHandleId++);
+        }
+
+        private DangerEffectView createView()
+        {
+            if (_WarningPrefab == null)
+            {
+                Debug.LogWarning("[DangerEffectManager] _WarningPrefab が未設定です。");
+                return null;
+            }
+
+            Transform parent = _Container != null ? _Container : transform;
+            return Instantiate(_WarningPrefab, parent);
+        }
+
+        private void destroyState(DangerEffectTargetState state)
+        {
+            removeCharacterMapping(state);
+
+            if (state._View != null)
+            {
+                state._View._OnTargetLost -= onViewTargetLost;
+                Destroy(state._View.gameObject);
+            }
+        }
+
+        /// <summary>
+        /// キャラクター追従スロットだった場合、_CharacterToStateからも取り除く。
+        /// キャラクターがDestroy済みの可能性があるため、キー(character)ではなく値(state)で検索する
+        /// (Destroy済みのUnityEngine.Objectをディクショナリキーとして扱うのは不安定なため避ける)。
+        /// </summary>
+        private void removeCharacterMapping(DangerEffectTargetState state)
+        {
+            CharacterUpdater keyToRemove = null;
+            foreach (var pair in _CharacterToState)
+            {
+                if (pair.Value == state)
+                {
+                    keyToRemove = pair.Key;
+                    break;
+                }
+            }
+
+            if (keyToRemove != null)
+            {
+                _CharacterToState.Remove(keyToRemove);
+            }
+        }
+
+        /// <summary>
+        /// 追従中のキャラクターがDestroyされてDangerEffectViewが見失った時に呼ばれる。
+        /// このスロットに紐づく攻撃予告を(複数あれば全部)まとめて片付ける。
+        /// 呼ばれるのはキャラクターが破棄された時だけなので、頻繁なUpdateループでの全探索にはならない。
+        /// </summary>
+        private void onViewTargetLost(DangerEffectView view)
+        {
+            DangerEffectTargetState state = findStateByView(view);
+            if (state == null) return;
+
+            var handlesToRemove = new List<DangerEffectHandle>();
+            foreach (var pair in _HandleToState)
+            {
+                if (pair.Value == state) handlesToRemove.Add(pair.Key);
+            }
+
+            foreach (var h in handlesToRemove)
+            {
+                _HandleToState.Remove(h);
+            }
+
+            destroyState(state);
+        }
+
+        private DangerEffectTargetState findStateByView(DangerEffectView view)
+        {
+            foreach (var pair in _CharacterToState)
+            {
+                if (pair.Value._View == view) return pair.Value;
+            }
+            return null;
+        }
+    }
+}
