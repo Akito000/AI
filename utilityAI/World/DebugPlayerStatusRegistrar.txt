@@ -1,0 +1,42 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace Game.World
+{
+    /// <summary>
+    /// シーン上のDebugStatusAilmentToggle/DebugIncomingAttackToggleをかき集めて、
+    /// WorldQueryServiceへ状態異常/敵攻撃予告として登録するブリッジ。
+    /// 本格的な状態異常/攻撃予告システムができたら、このクラスごと置き換えてよい
+    /// (IStatusAilmentProvider/IIncomingAttackProviderを実装したものをRegisterし直すだけでAI側は無改修)。
+    /// </summary>
+    public class DebugPlayerStatusRegistrar : MonoBehaviour, IStatusAilmentProvider, IIncomingAttackProvider
+    {
+        [SerializeField] private List<DebugStatusAilmentToggle> ailmentToggles = new List<DebugStatusAilmentToggle>();
+        [SerializeField] private List<DebugIncomingAttackToggle> attackToggles = new List<DebugIncomingAttackToggle>();
+        [Tooltip("Awake時にシーン内のトグルを自動で集める")]
+        [SerializeField] private bool autoFindOnAwake = true;
+
+        private void Awake()
+        {
+            if (autoFindOnAwake)
+            {
+                ailmentToggles = FindObjectsByType<DebugStatusAilmentToggle>(FindObjectsSortMode.None).ToList();
+                attackToggles = FindObjectsByType<DebugIncomingAttackToggle>(FindObjectsSortMode.None).ToList();
+            }
+
+            WorldQueryService.RegisterStatusAilmentProvider(this);
+            WorldQueryService.RegisterIncomingAttackProvider(this);
+        }
+
+        public IReadOnlyList<IStatusAilmentInfo> GetActiveAilments()
+        {
+            return ailmentToggles.Where(t => t != null && t.IsAfflicted).Cast<IStatusAilmentInfo>().ToList();
+        }
+
+        public IReadOnlyList<IIncomingAttackInfo> GetIncomingAttacks()
+        {
+            return attackToggles.Where(t => t != null && t.IsIncoming).Cast<IIncomingAttackInfo>().ToList();
+        }
+    }
+}

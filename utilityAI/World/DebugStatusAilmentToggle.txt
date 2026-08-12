@@ -1,0 +1,43 @@
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.World
+{
+    /// <summary>
+    /// デバッグ用: このキャラクターに状態異常を付与するかどうかをInspectorのチェックボックスで切り替えられる。
+    /// 本格的な状態異常システムができるまでの、Healerの回復AIの動作確認用。
+    /// CharacterUpdaterと同じGameObjectに付けて使う(4人それぞれに付けておけば、誰でもテストできる)。
+    /// </summary>
+    [RequireComponent(typeof(CharacterUpdater))]
+    public class DebugStatusAilmentToggle : MonoBehaviour, IStatusAilmentInfo
+    {
+        [Header("デバッグ: 状態異常の付与")]
+        [Tooltip("チェックを入れると、このキャラクターが状態異常になっているものとしてHealerのUtility AIから見えるようになる")]
+        [SerializeField] private bool isAfflicted = false;
+        [SerializeField] private ColorType ailmentColor = ColorType.Red;
+        [SerializeField, Range(0f, 1f)] private float dangerLevel = 0.5f;
+        [Tooltip("演出用の残り時間の目安。0未満にはならない(切り忘れても増減しなくなるだけ)")]
+        [SerializeField] private float remainingDuration = 10f;
+
+        private CharacterUpdater _character;
+
+        public bool IsAfflicted => isAfflicted;
+        public CharacterUpdater AffectedPlayer => _character;
+        public ColorType Color => ailmentColor;
+        public float RemainingDuration => remainingDuration;
+        public float DangerLevel => dangerLevel;
+
+        private void Awake()
+        {
+            _character = GetComponent<CharacterUpdater>();
+        }
+
+        private void Update()
+        {
+            if (isAfflicted)
+            {
+                remainingDuration = Mathf.Max(0f, remainingDuration - Time.deltaTime);
+            }
+        }
+    }
+}

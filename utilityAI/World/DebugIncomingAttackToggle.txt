@@ -1,0 +1,115 @@
+using UnityEngine;
+using Game.CharacterInput;
+using Game.DangerEffect;
+
+namespace Game.World
+{
+    /// <summary>
+    /// デバッグ用: このキャラクターが敵の攻撃を受けそうな状態かどうかをInspectorのチェックボックスで切り替えられる。
+    /// 本格的な攻撃予告システムができるまでの、Tankのバリア/防御AIの動作確認用。
+    /// 自分自身に付けてONにすれば「自分が狙われている」(BlockAttackAction向け)、
+    /// 他のキャラに付けてONにすれば「そのキャラが狙われている」(UseBarrierAction向け)のテストになる。
+    ///
+    /// ONにした瞬間にDangerEffectManagerで実際に警告表示(Plane)も出すため、
+    /// Tank AIが見ているデータと、実際に画面上で光る場所が一致していることを目で確認しながらデバッグできる。
+    /// </summary>
+    [RequireComponent(typeof(CharacterUpdater))]
+    public class DebugIncomingAttackToggle : MonoBehaviour, IIncomingAttackInfo
+    {
+        [Header("デバッグ: 敵攻撃の予告")]
+        [Tooltip("チェックを入れると、このキャラクターを狙った同色の敵攻撃が飛んでくるものとしてTankのUtility AIから見えるようになる")]
+        [SerializeField] private bool isIncoming = false;
+        [SerializeField] private ColorType attackColor = ColorType.Red;
+        [SerializeField] private float radius = 2f;
+        [SerializeField, Range(0f, 1f)] private float dangerLevel = 0.7f;
+        [Tooltip("着弾までの残り秒数の目安。0未満にはならない(切り忘れても減らなくなるだけ)")]
+        [SerializeField] private float timeToImpact = 5f;
+
+        [Header("デバッグ: 警告表示(DangerEffect)")]
+        [Tooltip("ONならこのキャラクターに追従する警告(showFollow)、OFFならONにした瞬間の座標に固定表示(show、落石想定)")]
+        [SerializeField] private bool useFollowWarning = true;
+
+        private CharacterUpdater _character;
+        private DangerEffectHandle _activeWarningHandle;
+        private bool _wasIncoming;
+
+        public bool IsIncoming => isIncoming;
+        public Vector3 Position => transform.position;
+        public float Radius => radius;
+        public ColorType Color => attackColor;
+        public CharacterUpdater TargetPlayer => _character;
+        public float DangerLevel => dangerLevel;
+        public float TimeToImpact => timeToImpact;
+
+        private void Awake()
+        {
+            _character = GetComponent<CharacterUpdater>();
+        }
+
+        private void Update()
+        {
+            if (isIncoming)
+            {
+                timeToImpact = Mathf.Max(0f, timeToImpact - Time.deltaTime);
+            }
+
+            // Inspectorでのチェックボックス切り替え(ON/OFF)を検知して、警告表示のshow/hideに反映する
+            if (isIncoming != _wasIncoming)
+            {
+                _wasIncoming = isIncoming;
+                if (isIncoming)
+                {
+                    showWarning();
+                }
+                else
+                {
+                    hideWarning();
+                }
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // キャラクターごとDestroyされた場合でも警告表示が残り続けないようにしておく
+            hideWarning();
+        }
+
+        private void showWarning()
+        {
+            if (DangerEffectManager.Instance == null) return;
+
+            UnityEngine.Color warningColor = toUnityColor(attackColor);
+
+            _activeWarningHandle = useFollowWarning
+                ? DangerEffectManager.Instance.showFollow(_character, warningColor)
+                : DangerEffectManager.Instance.show(transform.position, warningColor);
+        }
+
+        private void hideWarning()
+        {
+            if (DangerEffectManager.Instance == null) return;
+            if (!_activeWarningHandle.isValid()) return;
+
+            DangerEffectManager.Instance.hide(_activeWarningHandle);
+            _activeWarningHandle = DangerEffectHandle.Invalid;
+        }
+
+        /// <summary>
+        /// ゲーム内のColorType(色属性)をDangerEffect表示用のUnityEngine.Colorへ変換する。
+        /// このクラス自身がIIncomingAttackInfo.Color(ColorType型)というプロパティを持っているため、
+        /// 単に"Color"と書くとUnityEngine.Colorではなくそちらの意味に解決されてしまう。
+        /// そのためここでは常に"UnityEngine.Color"と完全修飾して書く。
+        /// </summary>
+        private static UnityEngine.Color toUnityColor(ColorType colorType)
+        {
+            switch (colorType)
+            {
+                case ColorType.Red: return UnityEngine.Color.red;
+                case ColorType.Blue: return UnityEngine.Color.blue;
+                case ColorType.Green: return UnityEngine.Color.green;
+                case ColorType.Yellow: return UnityEngine.Color.yellow;
+                default: return UnityEngine.Color.white;
+            }
+        }
+    }
+}

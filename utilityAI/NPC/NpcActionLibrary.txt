@@ -16,41 +16,42 @@ namespace Game.AI
             return new List<IUtilityAction>
             {
                 // --- 共通 ---
-                new IdleAction(),
-                new WanderMoveAction(),
-                new RetreatFromDangerAction(),
-                new WeakAttackAction(),
+                new IdleAction(),               // 何もしない(最終フォールバック)
+                new WanderMoveAction(),         // その場を軽くうろつく(Idleよりさらに優先度低めの穴埋め)
+                new RetreatFromDangerAction(),  // 自分を狙う危険な攻撃から逃げる
+                new WeakAttackAction(),         // 近くの敵/ボスへ弱攻撃(色不問・全ジョブ共通)
+                new MoveToEngageBossAction(),   // 特にやることが無ければボスへ近づく(全ジョブ共通の既定行動)
 
                 // 「ジョブ切り替え」: 自分と同色の脅威が来ているのに今その役割ではない、という状況で
                 // スコアが上がる。3ロール分を同じクラスの使い回しで表現している。
-                new RoleSwapForThreatAction(
+                new RoleSwapForThreatAction(    // 同色の敵攻撃が来ているのにTankでないなら交換を検討
                     "SwapToTankForAttack", RoleFlag.Tank, baseWeight: 1.8f, reactionWindowSeconds: 3f,
                     threatSelector: ctx => ctx.IncomingAttacks.Cast<object>()),
-                new RoleSwapForThreatAction(
+                new RoleSwapForThreatAction(    // 同色の状態異常が出ているのにHealerでないなら交換を検討
                     "SwapToHealerForAilment", RoleFlag.Healer, baseWeight: 1.3f, reactionWindowSeconds: 4f,
                     threatSelector: ctx => ctx.Ailments.Cast<object>()),
-                new RoleSwapForThreatAction(
+                new RoleSwapForThreatAction(    // 同色の敵/ボスがいるのにAttackerでないなら交換を検討
                     "SwapToAttackerForEnemy", RoleFlag.Attacker, baseWeight: 0.6f, reactionWindowSeconds: 5f,
                     threatSelector: ctx => ctx.Enemies.Cast<object>()),
 
                 // --- Attacker ---
-                new MoveToSameColorEnemyAction(),
-                new AttackSameColorEnemyAction(),
-                new StrongAttackEnemyAction(),
-                new MoveToBossAction(),
-                new AttackBossAction(),
-                new StrongAttackBossAction(),
+                new MoveToSameColorEnemyAction(), // 同色の雑魚敵のうち間合い外の最有力候補へ移動
+                new AttackSameColorEnemyAction(), // 間合いに入った同色の雑魚敵へ弱攻撃
+                new StrongAttackEnemyAction(),    // 間合いに入った同色の雑魚敵へ強攻撃(ジョブ固有)
+                new MoveToBossAction(),           // 攻撃可能なボスへ、間合い外なら移動
+                new AttackBossAction(),           // 間合いに入ったボスへ弱攻撃
+                new StrongAttackBossAction(),     // 間合いに入ったボスへ強攻撃(ジョブ固有)
 
                 // --- Tank ---
-                new MoveToProtectEndangeredAllyAction(),
-                new MoveToInterceptAttackAction(),
-                new UseBarrierAction(),
-                new BlockAttackAction(),
-                new MoveToGuardPositionAction(),
+                new MoveToProtectEndangeredAllyAction(), // 同色の攻撃を受けそうな味方へ移動
+                new MoveToInterceptAttackAction(),       // 味方を狙う同色攻撃の着弾位置へ割り込みに移動
+                new UseBarrierAction(),                  // 間合いに入った、狙われている味方をバリアで守る
+                new BlockAttackAction(),                 // 自分を狙う同色攻撃をその場で防御
+                new MoveToGuardPositionAction(),         // 脅威が無い平時にボスと味方の間の位置へ移動
 
                 // --- Healer ---
-                new MoveToAilingAllyAction(),
-                new CureAilmentAction(),
+                new MoveToAilingAllyAction(), // 同色の状態異常が出ている味方のうち最有力候補へ移動
+                new CureAilmentAction(),      // 間合いに入った同色の状態異常を回復
             };
         }
     }
