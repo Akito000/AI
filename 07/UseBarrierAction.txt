@@ -1,0 +1,52 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Tank用「バリアを使用」。同色かつ危険な攻撃を受けそうな味方を、間合いに入った状態でバリアによって守る。
+    /// 間合い外ならDistance評価が低くなり、MoveToProtectEndangeredAlly/MoveToInterceptAttack側の
+    /// 移動が先に選ばれ、近づいた後で自然にこちらへ切り替わる。
+    /// IReleasableActionを実装しているため、別のActionへ切り替わる瞬間にSpecialActionReleaseCommandが
+    /// 自動的に発行され、TankDriverがバリアを解除する。
+    /// </summary>
+    public class UseBarrierAction : UseAbilityActionBase, IReleasableAction
+    {
+        public override string Name => "UseBarrier";
+        public override float BaseWeight => 1.5f;
+        public override bool IsUrgentCapable => true;
+
+        protected override float CooldownSeconds => TankTuning.BarrierCooldown;
+        public override float MotionLockSeconds => 0.6f; // バリア詠唱の仮の目安
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, key: "Barrier:IsTank"),
+            new ColorMatchConsideration("Barrier:ColorMatch"),
+            new DangerConsideration("Barrier:Danger", easeIn: true),
+            new TimeToImpactConsideration(TankTuning.ReactionWindowSeconds, "Barrier:TimeToImpact"),
+            new DistanceConsideration("Barrier:InCastRange", TankTuning.BarrierCastRange, preferNear: true),
+            new CooldownReadyConsideration("UseBarrier", TankTuning.BarrierCooldown),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks
+                .Where(a => a.TargetPlayer != null && a.TargetPlayer != context.Self)
+                .Cast<object>();
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            IIncomingAttackInfo attack = (IIncomingAttackInfo)target;
+            return new SpecialActionCommand(attack.TargetPlayer.gameObject);
+        }
+
+        public ICommand CreateReleaseCommand(UtilityContext context, object target)
+        {
+            return SpecialActionReleaseCommand.Instance;
+        }
+    }
+}

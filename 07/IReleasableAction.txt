@@ -1,0 +1,19 @@
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 選ばれなくなった瞬間(Playerで言う「ボタンを離した瞬間」)に、終了を表すコマンドを
+    /// 1つだけ発行したいActionが実装するinterface。バリア/回復のように「開始した後、
+    /// 何もしなくても効果が続き、離したら止める」タイプの行動向け。
+    ///
+    /// NpcThinkDriverは、現在のActionがこれを実装していて、かつ次の決定が別のAction/Targetに
+    /// 切り替わるときだけ、切り替わる直前にCreateReleaseCommandを1回呼んで結果を発行する。
+    /// 強攻撃のような「1回実行して終わるだけ」の行動は実装しなくてよい(既定のまま)。
+    /// </summary>
+    public interface IReleasableAction
+    {
+        /// <summary>「離した」ことを表すコマンドを返す。nullなら何も発行しない。</summary>
+        ICommand CreateReleaseCommand(UtilityContext context, object target);
+    }
+}
