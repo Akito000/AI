@@ -1,0 +1,84 @@
+  public static class EnemyTargetState
+  {
+      public static CharacterUpdater CurrentTarget { get; set; }
+  }
+
+
+public class EnemyAttackMaker : MonoBehaviour, IIncomingAttackInfo
+{
+    // 攻撃情報リストを保護するためのロックオブジェクト
+    private static readonly object _EnemyAttackMakersLock = new object();
+
+    private static readonly List<EnemyAttackMaker> _EnemyAttackMakers
+        = new List<EnemyAttackMaker>();
+
+    /// <summary>
+    /// 現在存在している攻撃情報を取得する。
+    /// 並列処理中に元リストが変更されても問題ないよう、コピーを返す。
+    /// </summary>
+    public static EnemyAttackMaker[] GetEnemyAttackMakers()
+    {
+        lock (_EnemyAttackMakersLock)
+        {
+            return _EnemyAttackMakers.ToArray();
+        }
+    }
+
+    public Color AttackColor;
+
+    [Header("Utility AI向けの補足情報")]
+    [SerializeField] private float radius = 2f;
+
+    [SerializeField, Range(0f, 1f)]
+    private float dangerLevel = 0.7f;
+
+    [Tooltip("着弾までの残り秒数の目安。0未満にはならない")]
+    [SerializeField] private float timeToImpact = 5f;
+
+    private CharacterUpdater _TargetPlayer;
+
+    private void Awake()
+    {
+        // 攻撃生成時点のターゲットを保持する
+        _TargetPlayer = EnemyTargetState.CurrentTarget;
+
+        // 複数スレッドから同時に変更されてもListが壊れないようにする
+        lock (_EnemyAttackMakersLock)
+        {
+            _EnemyAttackMakers.Add(this);
+        }
+    }
+
+    private void OnDestroy()
+    {
+       
+        lock (_EnemyAttackMakersLock)
+        {
+            _EnemyAttackMakers.Remove(this);
+        }
+    }
+
+    private void Update()
+    {
+        timeToImpact = Mathf.Max(0f, timeToImpact - Time.deltaTime);
+    }
+
+   
+
+    Vector3 IIncomingAttackInfo.Position => transform.position;
+    float IIncomingAttackInfo.Radius => radius;
+    ColorType IIncomingAttackInfo.Color => ToColorType(AttackColor);
+    CharacterUpdater IIncomingAttackInfo.TargetPlayer => _TargetPlayer;
+    float IIncomingAttackInfo.DangerLevel => dangerLevel;
+    float IIncomingAttackInfo.TimeToImpact => timeToImpact;
+
+    private static ColorType ToColorType(Color color)
+    {
+        if (color == Color.red)    return ColorType.Red;
+        if (color == Color.blue)   return ColorType.Blue;
+        if (color == Color.green)  return ColorType.Green;
+        if (color == Color.yellow) return ColorType.Yellow;
+
+        return ColorType.None;
+    }
+}
