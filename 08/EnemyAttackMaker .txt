@@ -37,6 +37,13 @@ public class EnemyAttackMaker : MonoBehaviour, IIncomingAttackInfo
 
     private CharacterUpdater _TargetPlayer;
 
+   public void SetTarget(CharacterUpdater target)
+   {
+lock(_targetPlayer){
+       _targetPlayer = target;
+   }}
+
+
     private void Awake()
     {
         // 攻撃生成時点のターゲットを保持する
