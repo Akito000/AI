@@ -1,0 +1,39 @@
+// Considerations/SpawnerClaimConsideration.cs
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// スポナーが自分以外の誰かに担当されていないかを見るゲート。
+    /// 担当者が既にAttackerでなくなっている、または一定時間(staleAfterSeconds)動きを更新していない場合は
+    /// 「実質放置されている」とみなし、未着手と同じ1を返して横取りを許可する。
+    /// </summary>
+    public class SpawnerClaimConsideration : ConsiderationBase
+    {
+        private readonly float _staleAfterSeconds;
+
+        public SpawnerClaimConsideration(
+            float staleAfterSeconds = AttackerTuning.SpawnerClaimStaleSeconds,
+            string key = "SpawnerClaim",
+            float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _staleAfterSeconds = staleAfterSeconds;
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            if (target is not IEnemySpawnerInfo spawner) return 1f;
+
+            CharacterUpdater claimant = spawner.ClaimedBy;
+            if (claimant == null || claimant == context.Self) return 1f;
+
+            bool claimantStillAttacker = RoleSwapService.GetPrimaryRole(claimant) == RoleFlag.Attacker;
+            if (!claimantStillAttacker) return 1f;
+
+            bool claimIsStale = context.Now - spawner.ClaimedAt > _staleAfterSeconds;
+            return claimIsStale ? 1f : 0f;
+        }
+    }
+}

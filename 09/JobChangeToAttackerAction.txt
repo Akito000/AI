@@ -1,0 +1,45 @@
+using System.Collections.Generic;
+using System.Linq;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「ジョブ切り替え」(Attackerへ)。
+    /// 考慮事項は3つ: ①自分と同じ色の敵スポナー(EnemySpawner)がある ②自分が今Attackerでない
+    /// ③そのスポナーが他の誰かに担当されていない(担当中でも一定時間放置されていれば横取り可)。
+    /// Tank/Healerへの切り替えほど緊急性は高くないため、BaseWeightは2つより低めにしてある
+    /// (それでも他の雑務系Actionよりは優先されるよう、Idle/Wander等よりは十分高い)。
+    /// </summary>
+    public class JobChangeToAttackerAction : IUtilityAction
+    {
+        public string Name => "JobChangeToAttacker";
+        public float BaseWeight => 1.0f;
+        public bool IsUrgentCapable => true;
+
+        public IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, invert: true, key: "JobChangeToAttacker:NotAttackerYet"),
+            new ColorMatchConsideration("JobChangeToAttacker:ColorMatch"),
+            new SpawnerClaimConsideration(key: "JobChangeToAttacker:SpawnerClaim"),
+        };
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Spawners.Cast<object>();
+        }
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is IEnemySpawnerInfo spawner)
+            {
+                // このスポナーの担当を自分にする(既に自分が担当中なら更新=放置扱いにならないよう延長)。
+                spawner.ClaimedBy = context.Self;
+                spawner.ClaimedAt = context.Now;
+            }
+
+            result.Commands.Add(new RoleSwapRequestCommand(RoleFlag.Attacker));
+        }
+    }
+}

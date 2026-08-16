@@ -1,0 +1,130 @@
+using UnityEngine;
+#if UTILITY_AI_USE_NAVMESH
+using UnityEngine.AI;
+#endif
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 「今フレーム、どの方向へ進めばよいか」という方向ベクトルだけを返す移動ヘルパー。
+    /// 実際にキャラクターを動かすことはせず、実際の移動は既存のMoveDriverにMoveCommand(方向)として渡す
+    /// (AIがNavMeshAgent/Transformを直接持って細かく操作することは避ける)。
+    ///
+    /// Unityの navigation システム(NavMesh)が無い別エンジンへ移植する際は、
+    /// スクリプト定義シンボル UTILITY_AI_USE_NAVMESH を外せば、経路探索をしない
+    /// 直線移動版に切り替わる(Unity側の挙動を変えたくない場合はシンボルを付けたままでよい)。
+    /// どちらの版でも公開APIは同じなので、呼び出し側(NpcThinkDriver)の変更は不要。
+    /// </summary>
+    public class NpcNavMeshMover
+    {
+        private const float ArriveRadius = 0.6f;
+
+#if UTILITY_AI_USE_NAVMESH
+        private const float RepathIntervalSeconds = 0.3f;
+        private const float RepathDistanceThreshold = 0.75f;
+        private const float CornerAdvanceRadius = 0.4f;
+
+        private readonly NavMeshPath _path = new NavMeshPath();
+        private Vector3? _lastPathedDestination;
+        private float _nextRepathTime;
+        private int _cornerIndex;
+#endif
+
+        /// <summary>目的地への方向(XZ、正規化済み)を返す。到着済み/目的地なしならVector2.zero。</summary>
+        public Vector2 GetMoveDirection(Vector3 currentPosition, Vector3? destination)
+        {
+            if (destination == null)
+            {
+#if UTILITY_AI_USE_NAVMESH
+                _lastPathedDestination = null;
+#endif
+                return Vector2.zero;
+            }
+
+            Vector3 dest = destination.Value;
+
+            if (HorizontalDistance(currentPosition, dest) <= ArriveRadius)
+            {
+                return Vector2.zero;
+            }
+
+#if UTILITY_AI_USE_NAVMESH
+            return GetMoveDirectionViaNavMesh(currentPosition, dest);
+#else
+            return GetMoveDirectionDirect(currentPosition, dest);
+#endif
+        }
+
+#if UTILITY_AI_USE_NAVMESH
+        /// <summary>NavMeshで経路探索し、コーナーを順に辿って方向を出す版。</summary>
+        private Vector2 GetMoveDirectionViaNavMesh(Vector3 currentPosition, Vector3 dest)
+        {
+            bool needsRepath = _lastPathedDestination == null
+                                || Time.time >= _nextRepathTime
+                                || HorizontalDistance(_lastPathedDestination.Value, dest) > RepathDistanceThreshold;
+
+            if (needsRepath)
+            {
+                Repath(currentPosition, dest);
+            }
+
+            if (_path.corners.Length == 0)
+            {
+                // NavMesh上で経路が見つからない場合は直接目的地へ向かうフォールバック
+                return DirectionToXZ(currentPosition, dest);
+            }
+
+            // NavMeshは高さ方向にキャラクターのpivotとズレることがある(地面のNavMesh面高さ ≠ キャラクターのY)。
+            // 到達判定・方向計算は移動に関係するXZ平面だけで行い、Y差でコーナーに永遠に到達しない事故を防ぐ。
+            while (_cornerIndex < _path.corners.Length - 1 &&
+                   HorizontalDistance(currentPosition, _path.corners[_cornerIndex]) <= CornerAdvanceRadius)
+            {
+                _cornerIndex++;
+            }
+
+            Vector3 targetCorner = _path.corners[Mathf.Min(_cornerIndex, _path.corners.Length - 1)];
+            return DirectionToXZ(currentPosition, targetCorner);
+        }
+
+        private void Repath(Vector3 from, Vector3 to)
+        {
+            _lastPathedDestination = to;
+            _nextRepathTime = Time.time + RepathIntervalSeconds;
+            _cornerIndex = 0;
+
+            if (!NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _path))
+            {
+                _path.ClearCorners();
+            }
+        }
+#else
+        /// <summary>
+        /// NavMeshが無い環境向けの簡易フォールバック。経路探索はせず、目的地への直線方向をそのまま返す
+        /// (MoveDriverが直接Transformを動かすのと同じ発想の最低限の実装)。
+        /// 障害物回避はしないため、複雑な地形では壁に引っかかって動けなくなる点に注意。
+        /// あくまで「移動先の座標さえ出れば動く」ことを確認するための仮実装で、
+        /// 自エンジン側にナビゲーション機能があるならそちらに置き換えるのが前提。
+        /// </summary>
+        private Vector2 GetMoveDirectionDirect(Vector3 currentPosition, Vector3 dest)
+        {
+            return DirectionToXZ(currentPosition, dest);
+        }
+#endif
+
+        private static float HorizontalDistance(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
+        private static Vector2 DirectionToXZ(Vector3 from, Vector3 to)
+        {
+            Vector3 diff = to - from;
+            diff.y = 0f;
+            if (diff.sqrMagnitude < 0.0001f) return Vector2.zero;
+            Vector3 n = diff.normalized;
+            return new Vector2(n.x, n.z);
+        }
+    }
+}
