@@ -1,0 +1,92 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 自分が狙われていて、自分では対応できない(Tankではない/攻撃色と自分の色が違う)ときに、
+    /// その攻撃と同じ色を持つ味方に近寄って盾にする(色が合う味方なら代わりに対応できるため)。
+    ///
+    /// Considerations/GetTargetCandidatesが評価するtargetは「自分を狙う攻撃(IIncomingAttackInfo)」だが、
+    /// Actで実際に移動する先は「その攻撃と同色の味方」であり、評価targetとは別物。
+    /// RetreatFromDangerActionと同じく、Act内でcontextから改めて必要な情報を引き直すことで対応する。
+    /// </summary>
+    public class MoveToProtectiveAllyAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToProtectiveAlly";
+        public override float BaseWeight => 1f;
+        public override bool IsUrgentCapable => true;
+
+        private const float ReactionWindowSeconds = 2.5f;
+        private const float StandOffset = 1.5f; // 味方に重ならないための距離
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            // ②自分がタンクではない
+            new RoleGateConsideration(RoleFlag.Tank, invert: true, key: "MoveToProtectiveAlly:NotTank"),
+            // ③自分が敵の攻撃色と違う色
+            new ColorMismatchConsideration("MoveToProtectiveAlly:ColorMismatch"),
+            new DangerConsideration("MoveToProtectiveAlly:Danger", easeIn: true),
+            new TimeToImpactConsideration(ReactionWindowSeconds, "MoveToProtectiveAlly:TimeToImpact"),
+        };
+
+        // ①自分が狙われている、はここでの絞り込みそのもので表現する
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.IncomingAttacks.Where(a => a.TargetPlayer == context.Self).Cast<object>();
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IIncomingAttackInfo attack) return;
+
+            // 評価targetはあくまで「自分を狙う攻撃」。実際の移動先は同色の味方を探し直して決める。
+            CharacterUpdater shield = FindNearestSameColorAlly(context, attack.Color);
+            if (shield == null) return;
+
+            Vector3 offset = context.SelfPosition - shield.transform.position;
+            offset.y = 0f;
+            offset = offset.sqrMagnitude > 0.001f ? offset.normalized : Vector3.forward;
+
+            result.MoveDestination = shield.transform.position + offset * StandOffset;
+        }
+
+        private static CharacterUpdater FindNearestSameColorAlly(UtilityContext context, ColorType attackColor)
+        {
+            CharacterUpdater best = null;
+            float bestSqrDist = float.MaxValue;
+            foreach (CharacterUpdater ally in context.Allies)
+            {
+                if (ally.Color != attackColor) continue;
+                float sqrDist = (ally.transform.position - context.SelfPosition).sqrMagnitude;
+                if (sqrDist < bestSqrDist)
+                {
+                    bestSqrDist = sqrDist;
+                    best = ally;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// ColorMatchConsiderationの逆条件(色が"合わない"ときだけ1)。
+        /// 基盤(Considerationsフォルダ)を増やさず、このAction専用としてここに閉じ込める。
+        /// </summary>
+        private class ColorMismatchConsideration : ConsiderationBase
+        {
+            public ColorMismatchConsideration(string key, float defaultWeight = 1f) : base(key, defaultWeight)
+            {
+            }
+
+            protected override float GetRawValue(UtilityContext context, object target)
+            {
+                if (target is not IIncomingAttackInfo attack) return 0f;
+                if (attack.Color == ColorType.None) return 0f; // 無色攻撃は誰でも対応できるためこのActionの対象外
+                return attack.Color != context.SelfColor ? 1f : 0f;
+            }
+        }
+    }
+}

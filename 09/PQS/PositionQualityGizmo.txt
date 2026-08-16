@@ -1,0 +1,57 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// PositionQualitySystem(PQS)の危険度をScene view上に可視化するデバッグ専用コンポーネント。
+    /// ボス等のGameObjectに付けると、自分のTransformを中心に円状にサンプリングした地点を、
+    /// 危険度に応じて赤(危険=正面寄り)〜青(安全=背面寄り)のスフィアギズモで表示する。
+    /// ゲームプレイのロジックには一切関与しない(見た目の確認専用)。
+    /// </summary>
+    public class PositionQualityGizmo : MonoBehaviour
+    {
+        [SerializeField] private bool showGizmos = true;
+
+        [Tooltip("危険度をサンプリングする円の半径。複数指定するとその数だけリングを表示する。")]
+        [SerializeField] private float[] sampleRadii = { AttackerTuning.FlankRadius, AttackerTuning.MeleeRange };
+
+        [SerializeField] private int sampleCountPerRing = 24;
+        [SerializeField] private float sphereSize = 0.2f;
+        [SerializeField] private Color dangerousColor = Color.red;
+        [SerializeField] private Color safeColor = Color.blue;
+
+        private void OnDrawGizmos()
+        {
+            if (!showGizmos || sampleRadii == null || sampleRadii.Length == 0) return;
+
+            Vector3 pivotPosition = transform.position;
+            Vector3 pivotForward = transform.forward;
+
+            foreach (float radius in sampleRadii)
+            {
+                DrawRing(pivotPosition, pivotForward, radius);
+            }
+
+            // 正面方向の目安線(赤いスフィアが並ぶ側と一致しているかの確認用)
+            Gizmos.color = Color.white;
+            float maxRadius = Mathf.Max(sampleRadii);
+            Gizmos.DrawLine(pivotPosition, pivotPosition + pivotForward.normalized * (maxRadius + 0.5f));
+        }
+
+        private void DrawRing(Vector3 pivotPosition, Vector3 pivotForward, float radius)
+        {
+            if (radius <= 0f || sampleCountPerRing <= 0) return;
+
+            for (int i = 0; i < sampleCountPerRing; i++)
+            {
+                float angle = (360f / sampleCountPerRing) * i;
+                Vector3 offset = Quaternion.Euler(0f, angle, 0f) * Vector3.forward * radius;
+                Vector3 candidate = pivotPosition + offset;
+
+                float danger = PositionQualitySystem.EvaluateDanger(candidate, pivotPosition, pivotForward);
+                Gizmos.color = Color.Lerp(safeColor, dangerousColor, danger);
+                Gizmos.DrawSphere(candidate, sphereSize);
+            }
+        }
+    }
+}

@@ -1,0 +1,41 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 自分の現在位置が、Target(ボス等)から見てどれだけ安全かを評価するConsideration。
+    /// PositionQualitySystem(PQS)で正面/背面の角度を判定し、正面に立っているほどスコアを下げる
+    /// (=背面に回り込んでいるときほど、このActionを選びやすくする)。
+    /// Targetが向きを持たない場合(IEnemyInfo等)は中立値(ペナルティなし)を返す。
+    /// </summary>
+    public class PositionSafetyConsideration : ConsiderationBase
+    {
+        private readonly float _minScore;
+
+        /// <param name="minScore">
+        /// 真正面に立っているときの下限スコア。0にすると「正面からは絶対に攻撃できない」という
+        /// ハードゲートになってしまう(UtilityScorerはConsiderationが1つでも0ならAction全体を0にする)。
+        /// ここではあくまで「背面の方が得」と相対的に思わせたいだけなので、緩やかな下限に留める。
+        /// </param>
+        public PositionSafetyConsideration(string key, float minScore = 0.35f, float defaultWeight = 1f)
+            : base(key, defaultWeight)
+        {
+            _minScore = Mathf.Clamp01(minScore);
+        }
+
+        protected override float GetRawValue(UtilityContext context, object target)
+        {
+            Vector3? pivotPosition = TargetUtility.GetPosition(target);
+            Vector3? pivotForward = TargetUtility.GetForward(target);
+            if (pivotPosition == null || pivotForward == null) return 0f;
+
+            return PositionQualitySystem.EvaluateDanger(context.SelfPosition, pivotPosition.Value, pivotForward.Value);
+        }
+
+        /// <summary>rawは危険度(0=背面/安全〜1=正面/危険)。安全なほど1、危険なほどminScoreへ近づける。</summary>
+        protected override float ApplyCurve(float normalizedRaw)
+        {
+            return Mathf.Lerp(1f, _minScore, normalizedRaw);
+        }
+    }
+}

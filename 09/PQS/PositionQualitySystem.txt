@@ -1,0 +1,74 @@
+using UnityEngine;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 位置評価システム(PQS: Position Quality System)。
+    /// ある地点が、ボス等の「向き」から見てどれだけ危険かを0(背面/安全)〜1(正面/危険)で評価する。
+    /// 現状の評価軸は正面/背面の角度のみ(Y成分は無視してXZ平面で判定)。
+    /// 将来、味方との重なりや障害物なども評価軸に加えたくなったらこのファイルに集約する。
+    /// </summary>
+    public static class PositionQualitySystem
+    {
+        /// <summary>
+        /// candidatePositionが、pivotPosition(ボス等)の向き(pivotForward)から見てどれだけ正面寄りかを返す。
+        /// 真後ろ(pivotForwardと逆方向)なら0、真正面(pivotForwardと同方向)なら1、真横なら0.5。
+        /// </summary>
+        public static float EvaluateDanger(Vector3 candidatePosition, Vector3 pivotPosition, Vector3 pivotForward)
+        {
+            Vector3 toCandidate = candidatePosition - pivotPosition;
+            toCandidate.y = 0f;
+            if (toCandidate.sqrMagnitude < 0.0001f) return 0.5f;
+
+            Vector3 forward = FlattenAndNormalize(pivotForward);
+
+            float dot = Vector3.Dot(toCandidate.normalized, forward);
+            // dot: -1(真後ろ)〜+1(真正面) を 0〜1 の危険度へ変換
+            return Mathf.InverseLerp(-1f, 1f, dot);
+        }
+
+        /// <summary>
+        /// pivotPosition(ボス等)を中心とした半径radiusの円周上をsampleCount分割で走査し、
+        /// 最も危険度(EvaluateDanger)が低い=背面寄りの地点を選ぶ。
+        /// currentPositionからの移動距離をわずかにコストへ加味することで、危険度が同程度なら
+        /// 近い候補を優先し、遠回りしすぎず自然に背面へ回り込むような軌道になる。
+        /// </summary>
+        public static Vector3 FindLowDangerPosition(
+            Vector3 pivotPosition,
+            Vector3 pivotForward,
+            float radius,
+            Vector3 currentPosition,
+            int sampleCount = 16,
+            float travelCostWeight = 0.3f)
+        {
+            Vector3 forward = FlattenAndNormalize(pivotForward);
+            Vector3 best = pivotPosition - forward * radius;
+            float bestCost = float.MaxValue;
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float angle = (360f / sampleCount) * i;
+                Vector3 offset = Quaternion.Euler(0f, angle, 0f) * Vector3.forward * radius;
+                Vector3 candidate = pivotPosition + offset;
+
+                float danger = EvaluateDanger(candidate, pivotPosition, forward);
+                float travelT = Mathf.Clamp01(Vector3.Distance(currentPosition, candidate) / Mathf.Max(0.01f, radius * 2f));
+                float cost = danger + travelT * travelCostWeight;
+
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    best = candidate;
+                }
+            }
+
+            return best;
+        }
+
+        private static Vector3 FlattenAndNormalize(Vector3 v)
+        {
+            v.y = 0f;
+            return v.sqrMagnitude < 0.0001f ? Vector3.forward : v.normalized;
+        }
+    }
+}

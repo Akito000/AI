@@ -1,0 +1,43 @@
+using System.Collections.Generic;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Attacker用「ボスを攻撃」(弱攻撃)。間合いに入っているボスへ弱攻撃を当てる。
+    /// PositionSafetyConsiderationにより、ボスの正面に立っているときはスコアがやや下がる
+    /// (完全に禁止はしない)。攻撃後のクールダウン中はこのAction自体のスコアが下がりMoveToBossAction側が
+    /// 選ばれやすくなるため、結果としてクールダウンの合間に背面寄りの位置(MoveToBossActionが目指す
+    /// PQSの低危険度地点)へ回り込みながら攻撃を繰り返す動きになる。
+    /// </summary>
+    public class AttackBossAction : UseAbilityActionBase
+    {
+        public override string Name => "AttackBoss";
+        public override float BaseWeight => 1.1f;
+
+        private const float CooldownDuration = 1.2f;
+        protected override float CooldownSeconds => CooldownDuration;
+        public override float MotionLockSeconds => 0.35f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "AttackBoss:IsAttacker"),
+            new DistanceConsideration("AttackBoss:InRange", AttackerTuning.MeleeRange, preferNear: true),
+            new CooldownReadyConsideration("AttackBoss", CooldownDuration),
+            new PositionSafetyConsideration("AttackBoss:PositionSafety"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss != null && context.Boss.IsAlive && context.Boss.IsAttackable)
+            {
+                yield return context.Boss;
+            }
+        }
+
+        protected override ICommand CreateCommand(UtilityContext context, object target)
+        {
+            return new WeakAttackCommand(TargetUtility.GetGameObject(target));
+        }
+    }
+}
