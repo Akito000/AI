@@ -1,0 +1,62 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>Attacker用「同色の雑魚敵へ移動」。同色の雑魚敵のうち、間合い外にいる最有力候補へ近づく。</summary>
+    public class MoveToSameColorEnemyAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToSameColorEnemy";
+        public override float BaseWeight => 1f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "MoveToEnemy:IsAttacker"),
+            new ColorMatchConsideration("MoveToEnemy:ColorMatch"),
+            new DangerConsideration("MoveToEnemy:Danger"),
+            // AttackSameColorEnemyAction側の間合い判定(MeleeRange)とは別のスケールで正規化する
+            // (大型の敵はColliderに阻まれて間合いの奥まで到達できないことがあるため)。
+            new DistanceConsideration("MoveToEnemy:NeedToMove", AttackerTuning.SearchRadius, preferNear: false),
+            new DistanceConsideration("MoveToEnemy:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "MoveToEnemy:Sticky"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Enemies.Where(e => e.IsAlive).Cast<object>();
+        }
+
+        /// <summary>
+        /// 敵の正面へ直進せず、内積だけで「自分が敵から見て右にいるか左にいるか」を判定し、
+        /// 既にいる側の側面地点を目的地にする(PQSのような円周サンプリングは行わない、最小限の計算)。
+        /// 危険度(IEnemyInfo.DangerLevel)が高い敵ほど側面の距離を大きく取り、慎重に近づく。
+        /// </summary>
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is IEnemyInfo enemy && enemy.Transform != null)
+            {
+                Vector3 enemyPos = enemy.Position;
+                Vector3 forward = enemy.Transform.forward;
+                forward.y = 0f;
+                forward = forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
+
+                // 敵から見て右方向。この向きへの内積の符号だけで、自分が右側/左側のどちらにいるかを判定する。
+                Vector3 rightSide = Vector3.Cross(Vector3.up, forward).normalized;
+
+                Vector3 toSelf = context.SelfPosition - enemyPos;
+                toSelf.y = 0f;
+                float sideSign = Vector3.Dot(toSelf, rightSide) >= 0f ? 1f : -1f;
+
+                float flankDistance = Mathf.Lerp(AttackerTuning.FlankRadius * 0.6f, AttackerTuning.FlankRadius, enemy.DangerLevel);
+
+                result.MoveDestination = enemyPos + rightSide * (sideSign * flankDistance);
+                return;
+            }
+
+            base.Act(context, target, result);
+        }
+    }
+}

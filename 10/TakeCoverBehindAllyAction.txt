@@ -1,0 +1,92 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「タンクに守られる」。自分を狙っている敵攻撃と同じ色の味方(=その攻撃に対応できる、
+    /// 実質的なタンク役)がいる場合、ただ逆方向へ逃げる(RetreatFromDangerAction)のではなく、
+    /// その味方の後ろ(攻撃元から見て味方の背後)へ回り込んで盾にする。
+    /// Tank自身は誰かの後ろに隠れる必要が無いので対象外(RoleGateConsiderationで除外)。
+    ///
+    /// PositionQualitySystem(PQS)のような円周サンプリングは使わず、内積/外積だけで
+    /// 「まだ味方の後ろ側まで回り込めていないか」を判定する。回り込めていない間は味方の横の
+    /// 中継地点(現在自分がいる側)を目的地にし、回り込めたら味方の真後ろを目的地にする。
+    /// Urgent Check(0.1秒間隔)のたびに現在位置から再計算されるため、結果として
+    /// ナビゲーションを使わなくても弧を描くように背後へ回り込む動きになる。
+    /// </summary>
+    public class TakeCoverBehindAllyAction : MoveToTargetActionBase
+    {
+        public override string Name => "TakeCoverBehindAlly";
+        public override float BaseWeight => 1.15f;
+        public override bool IsUrgentCapable => true;
+
+        private const float ReactionWindowSeconds = 2.5f;
+        private const float CoverBehindDistance = 2.2f;
+        private const float CoverSideDistance = 2.5f;
+
+        /// <summary>-1(味方から見て真正面)〜+1(真後ろ)。この値以上なら「もう回り込めた」とみなす。</summary>
+        private const float FlankAlignmentThreshold = 0.3f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, invert: true, key: "TakeCover:NotTank"),
+            new DangerConsideration("TakeCover:Danger", easeIn: true),
+            new TimeToImpactConsideration(ReactionWindowSeconds, "TakeCover:TimeToImpact"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            foreach (IIncomingAttackInfo attack in context.IncomingAttacks)
+            {
+                if (attack.TargetPlayer != context.Self) continue;
+                if (FindShieldAlly(context, attack) == null) continue;
+                yield return attack;
+            }
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IIncomingAttackInfo attack) return;
+
+            CharacterUpdater shield = FindShieldAlly(context, attack);
+            if (shield == null) return;
+
+            Vector3 shieldPos = shield.transform.position;
+
+            Vector3 awayFromAttack = shieldPos - attack.Position;
+            awayFromAttack.y = 0f;
+            awayFromAttack = awayFromAttack.sqrMagnitude > 0.001f ? awayFromAttack.normalized : Vector3.forward;
+
+            Vector3 toSelf = context.SelfPosition - shieldPos;
+            toSelf.y = 0f;
+
+            float behindAlignment = toSelf.sqrMagnitude > 0.001f
+                ? Vector3.Dot(toSelf.normalized, awayFromAttack)
+                : 1f;
+
+            if (behindAlignment >= FlankAlignmentThreshold)
+            {
+                // 十分に味方の背後側まで回り込めている: そのまま真後ろの地点へ詰める。
+                result.MoveDestination = shieldPos + awayFromAttack * CoverBehindDistance;
+                return;
+            }
+
+            // まだ前方/側面寄り: 現在自分がいる側(内積の符号)の横の中継地点を経由させ、弧を描いて回り込ませる。
+            Vector3 sideDir = Vector3.Cross(Vector3.up, awayFromAttack).normalized;
+            float sideSign = Vector3.Dot(toSelf, sideDir) >= 0f ? 1f : -1f;
+
+            result.MoveDestination = shieldPos
+                                      + sideDir * (sideSign * CoverSideDistance)
+                                      + awayFromAttack * (CoverBehindDistance * 0.3f);
+        }
+
+        private static CharacterUpdater FindShieldAlly(UtilityContext context, IIncomingAttackInfo attack)
+        {
+            return context.Allies.FirstOrDefault(ally => ally.Color == attack.Color);
+        }
+    }
+}

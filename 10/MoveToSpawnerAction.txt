@@ -1,0 +1,41 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// Attacker用「同色の敵スポナーへ移動」。JobChangeToAttackerActionでAttackerに切り替わった後、
+    /// 間合い外にいる同色スポナーへ近づく(DestroySpawnerActionが間合い内で引き継いで破壊する)。
+    /// 目的地はSimpleObstacleAvoidanceに通してから代入することで、経路上に敵が立ち塞がっていれば
+    /// 自動で横へ迂回する(Colliderに引っかかって動けなくなるのを防ぐ)。
+    /// </summary>
+    public class MoveToSpawnerAction : MoveToTargetActionBase
+    {
+        public override string Name => "MoveToSpawner";
+        public override float BaseWeight => 0.8f;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "MoveToSpawner:IsAttacker"),
+            new ColorMatchConsideration("MoveToSpawner:ColorMatch"),
+            new DistanceConsideration("MoveToSpawner:NeedToMove", AttackerTuning.SearchRadius, preferNear: false),
+            new DistanceConsideration("MoveToSpawner:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "MoveToSpawner:Sticky"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            return context.Spawners.Cast<object>();
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            Vector3? position = TargetUtility.GetPosition(target);
+            if (!position.HasValue) return;
+
+            result.MoveDestination = SimpleObstacleAvoidance.AvoidEnemiesOnPath(context, position.Value);
+        }
+    }
+}
