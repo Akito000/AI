@@ -1,0 +1,30 @@
+  public class StayBehindTankAction : MoveToTargetActionBase
+  {
+      public override string Name => "StayBehindTank";
+      public override float BaseWeight => 0.4f;
+
+      public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+      {
+          new RoleGateConsideration(RoleFlag.Tank, invert: true, key: "StayBehindTank:NotTank"),
+          new DistanceConsideration("StayBehindTank:NeedToMove", CommonTuning.EngageSearchRadius, preferNear: false),
+      };
+
+      public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+      {
+          CharacterUpdater tank = context.Allies.FirstOrDefault(ally => RoleSwapService.GetPrimaryRole(ally) == RoleFlag.Tank);
+          if (tank == null) yield break;
+          yield return tank;
+      }
+
+      public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+      {
+          if (target is not CharacterUpdater tank) return;
+
+          Vector3 dangerSourcePosition = context.Boss != null && context.Boss.IsAlive
+              ? context.Boss.Position
+              : context.SelfPosition;
+
+          result.MoveDestination = CoverPositioning.ComputeApproachBehindPoint(
+              context.SelfPosition, tank.transform.position, dangerSourcePosition);
+      }
+  }

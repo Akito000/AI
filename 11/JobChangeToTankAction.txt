@@ -1,0 +1,117 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「ジョブ切り替え」(Tankへ)。UtilityAIとゴールベースAIのハイブリッドとして扱う特殊処理
+    /// (Attacker用DestroySpawnerGoalActionと同じ考え方)。
+    ///
+    /// ジョブ交換だけをAct()して終わりにすると、実際に役割が切り替わるまでの間(RoleStatusの反映は
+    /// 次のTick()まで遅延する)、他の共通Action(MoveToEngageBoss等)やスコアの揺れに割り込まれ、
+    /// 「ジョブは変わったのに誰も守りに向かわない」瞬間が生まれやすい。またジョブ交換後の接近・バリアを
+    /// MoveBetweenBossAndTargetAction/UseBarrierActionという別々のActionへ完全に委ねてしまうと、
+    /// 間合いの境界付近でのスコアの揺れにより「近づく⇔バリア」を行き来しかねない。
+    ///
+    /// そこでこのActionでは「誰(どの攻撃)を守るか」の初期選定だけをUtility AI(Considerationsによる
+    /// スコア比較)に任せ、一度選んだらその攻撃が無効(着弾/対象消失/色不一致)になるまではGetTargetCandidates
+    /// がそのTargetだけを返し続ける「ゴール」として扱う。ゴールを持っている間のAct()内部では、
+    /// ①ジョブ交換要求→②間合い外なら間に入る位置へ接近(近づきすぎない。TankTuning.BarrierCastRangeで
+    /// 頭打ち)→③間合い内ならバリアを実行、という一連の流れを直接実行する。
+    /// 役割が実際にTankへ切り替わった後は、RoleGateConsideration(invert)によりこのActionのスコアが
+    /// 0になり、以降は通常のMoveBetweenBossAndTargetAction/UseBarrierActionへ自然に引き継がれる。
+    /// </summary>
+    public class JobChangeToTankAction : IUtilityAction, IMotionLockingAction, IReleasableAction
+    {
+        public string Name => "JobChangeToTank";
+        public float BaseWeight => 2.2f;
+        public bool IsUrgentCapable => true;
+
+        /// <summary>現在確定しているゴール(守ろうとしている攻撃)。無効化されるまで他候補を見ない。</summary>
+        private IIncomingAttackInfo _committedAttack;
+        private bool _isBarrierPhase;
+
+        /// <summary>バリアフェーズの間だけ専有する(接近フェーズはThinkを毎回再評価させ、経路を追従させたい)。</summary>
+        public float MotionLockSeconds => _isBarrierPhase ? TankTuning.BarrierDurationSeconds : 0f;
+
+        public IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Tank, invert: true, key: "JobChangeToTank:NotTankYet"),
+            new ColorMatchConsideration("JobChangeToTank:ColorMatch"),
+        };
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            // ゴール確定済み: その攻撃がまだ有効な間は他候補を一切見ず、これだけを返し続ける
+            // (=毎Thinkの再比較で守る相手が乗り換わらないようにする、ゴールベースAI的な固定)。
+            if (_committedAttack != null)
+            {
+                bool stillValid = context.IncomingAttacks.Contains(_committedAttack)
+                                   && _committedAttack.TargetPlayer != null
+                                   && _committedAttack.TargetPlayer != context.Self;
+                if (stillValid)
+                {
+                    yield return _committedAttack;
+                    yield break;
+                }
+
+                _committedAttack = null; // 着弾/対象消失: ゴールを解放し、通常のUtility比較に戻す
+                _isBarrierPhase = false;
+            }
+
+            // ゴール未確定: バリアで守れる(=標的が自分以外の)攻撃だけを通常のUtility比較にかける。
+            foreach (IIncomingAttackInfo attack in context.IncomingAttacks)
+            {
+                if (attack.TargetPlayer == null || attack.TargetPlayer == context.Self) continue;
+                yield return attack;
+            }
+        }
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IIncomingAttackInfo attack || attack.TargetPlayer == null) return;
+
+            _committedAttack = attack; // ここでゴールとして確定する(既に確定済みならそのまま維持)
+
+            // フェーズ0: ジョブ交換。既にTankならRoleSwapService側で何もしないため、
+            // 反映が済むまで毎Think送り続けても無害(RequestRoleは既に目的の役割を持っていればno-op)。
+            if (context.SelfRole != RoleFlag.Tank)
+            {
+                result.Commands.Add(new RoleSwapRequestCommand(RoleFlag.Tank));
+            }
+
+            // ボスがいればボスと標的の中間、いなければ攻撃の発生地点を「敵側」の目安にする。
+            Vector3 enemySidePoint = (context.Boss != null && context.Boss.IsAlive) ? context.Boss.Position : attack.Position;
+            Vector3 interceptPoint = Vector3.Lerp(attack.TargetPlayer.transform.position, enemySidePoint, TankTuning.InterceptPositionBias);
+
+            float distance = context.DistanceTo(interceptPoint);
+            if (distance > TankTuning.BarrierCastRange)
+            {
+                // フェーズ1: 接近。間合いに入るまでは、近づきすぎず(=BarrierCastRangeで頭打ち)ひたすら近づく。
+                _isBarrierPhase = false;
+                result.MoveDestination = SimpleObstacleAvoidance.AvoidEnemiesOnPath(context, interceptPoint);
+                return;
+            }
+
+            // フェーズ2: バリア実行。間合いに入ったらその場に留まり(MoveDestinationには触れない)、
+            // クールダウンが空いていればバリアを張る。
+            _isBarrierPhase = true;
+            if (!context.Cooldowns.IsReady(Name)) return;
+
+            context.Cooldowns.SetCooldown(Name, TankTuning.BarrierCooldown);
+            result.Commands.Add(new SpecialActionCommand(attack.TargetPlayer.gameObject));
+        }
+
+        /// <summary>
+        /// TankDriver側は既にバリアが非アクティブなら解除コマンドを無視するため、実際にバリアフェーズへ
+        /// 到達していたかを問わず常に返してよい(UseBarrierActionと同じ考え方)。
+        /// </summary>
+        public ICommand CreateReleaseCommand(UtilityContext context, object target)
+        {
+            return SpecialActionReleaseCommand.Instance;
+        }
+    }
+}

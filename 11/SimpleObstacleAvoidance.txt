@@ -1,0 +1,77 @@
+using UnityEngine;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// ナビゲーションを使わない直進移動が、自分とTargetの間に立っている敵のColliderに引っかかって
+    /// 動けなくなる問題への最小限の回避策。PositionQualitySystem(PQS)のような円周サンプリングは行わず、
+    /// 内積(経路への射影)と外積(迂回方向)だけで「経路上に敵が立ち塞がっていないか」を判定し、
+    /// いれば横へ迂回する中継地点を返す。塞いでいる敵がいなければgoalをそのまま返す。
+    ///
+    /// 各Actionは今まで通りMoveToTargetActionBaseを継承したまま、Act()内で目的地を決めた直後に
+    /// このAvoidEnemiesOnPathへ通すだけでよい(DestroySpawnerGoalAction/MoveToAilingAllyAction/
+    /// MoveToGuardPositionAction/MoveBetweenBossAndTargetAction参照)。
+    /// </summary>
+    public static class SimpleObstacleAvoidance
+    {
+        private const float DefaultCorridorWidth = 1.5f;
+        private const float DefaultClearance = 2.2f;
+
+        public static Vector3 AvoidEnemiesOnPath(
+            UtilityContext context,
+            Vector3 goal,
+            float corridorWidth = DefaultCorridorWidth,
+            float clearance = DefaultClearance)
+        {
+            Vector3 selfPos = context.SelfPosition;
+            Vector3 toGoal = goal - selfPos;
+            toGoal.y = 0f;
+            float distanceToGoal = toGoal.magnitude;
+            if (distanceToGoal < 0.01f) return goal;
+
+            Vector3 pathDir = toGoal / distanceToGoal;
+
+            IEnemyInfo blocker = null;
+            float blockerAlongDist = float.MaxValue;
+
+            foreach (IEnemyInfo enemy in context.Enemies)
+            {
+                if (!enemy.IsAlive) continue;
+
+                Vector3 toEnemy = enemy.Position - selfPos;
+                toEnemy.y = 0f;
+
+                // 経路(pathDir)への射影(内積) = その敵が自分からどれだけ「前方」にいるか。
+                float alongDist = Vector3.Dot(toEnemy, pathDir);
+                // 自分より後ろ、あるいはgoalより奥にいる敵は経路を塞がない。
+                if (alongDist <= 0f || alongDist >= distanceToGoal) continue;
+
+                Vector3 nearestOnPath = selfPos + pathDir * alongDist;
+                float lateralDist = Vector3.Distance(enemy.Position, nearestOnPath);
+                if (lateralDist >= corridorWidth) continue;
+
+                // 一番手前(自分に近い側)で塞いでいる敵を優先して避ける。
+                if (alongDist < blockerAlongDist)
+                {
+                    blockerAlongDist = alongDist;
+                    blocker = enemy;
+                }
+            }
+
+            if (blocker == null) return goal;
+
+            Vector3 nearestOnPathToBlocker = selfPos + pathDir * blockerAlongDist;
+            Vector3 lateralOffset = blocker.Position - nearestOnPathToBlocker;
+            lateralOffset.y = 0f;
+
+            // 経路に垂直な方向(外積)。敵が経路からどちら側へズレているかで、逆側へ避けて
+            // クリアランスを大きく取る(敵がほぼ真正面でズレが無い場合は常に同じ側へ避ける)。
+            Vector3 sideDir = Vector3.Cross(Vector3.up, pathDir).normalized;
+            float lateralSign = Vector3.Dot(lateralOffset, sideDir);
+            float avoidSign = lateralSign > 0.05f ? -1f : 1f;
+
+            return blocker.Position + sideDir * (avoidSign * clearance);
+        }
+    }
+}

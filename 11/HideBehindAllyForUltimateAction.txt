@@ -1,0 +1,51 @@
+  /// <summary>
+  /// 共通行動候補の「超必殺を、色が合わないなら攻撃色の味方の後ろで待機する」(確定行動)。
+  /// 敵の超必殺(IIncomingAttackInfo.IsUltimate)が来ていて、かつその攻撃色が自分の色と異なる場合に発動する
+  /// (色が合う側はBlockUltimateAttackActionが担当するため、ここでは除外する)。
+  ///
+  /// 目的地の計算はTakeCoverBehindAllyActionと同じCoverPositioningへ委譲する
+  /// (内積/外積だけの最小実装。ナビゲーションもPQSも使わない)。TakeCoverBehindAllyActionとの違いは、
+  /// ①自分が狙われているかどうかを問わない(超必殺はパーティ全体への脅威のため) ②Tankも対象に含む
+  /// (超必殺の色に自分の色が合わないなら、現在Tankでも隠れる側に回る)の2点。
+  ///
+  /// BaseWeightは既存の最大値より十分大きくしてあり、他の全行動より確実に選ばれる。
+  /// 味方の後ろへ着いたあとはArriveRadius圏内に入って自然に移動が止まる(=待機)。
+  /// </summary>
+  public class HideBehindAllyForUltimateAction : MoveToTargetActionBase
+  {
+      public override string Name => "HideBehindAllyForUltimate";
+      public override float BaseWeight => 5f;
+      public override bool IsUrgentCapable => true;
+
+      public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+      {
+          new ConstantConsideration(1f, "HideForUltimate:Baseline"),
+      };
+
+      public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+      {
+          foreach (IIncomingAttackInfo attack in context.IncomingAttacks)
+          {
+              if (!attack.IsUltimate) continue;
+              if (attack.Color == context.SelfColor) continue; // 色が合う側はBlockUltimateAttackActionの担当
+              if (FindShieldAlly(context, attack) == null) continue; // 隠れられる味方がいなければ対象外
+              yield return attack;
+          }
+      }
+
+      public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+      {
+          if (target is not IIncomingAttackInfo attack) return;
+
+          CharacterUpdater shield = FindShieldAlly(context, attack);
+          if (shield == null) return;
+
+          result.MoveDestination = CoverPositioning.ComputeApproachBehindPoint(
+              context.SelfPosition, shield.transform.position, attack.Position);
+      }
+
+      private static CharacterUpdater FindShieldAlly(UtilityContext context, IIncomingAttackInfo attack)
+      {
+          return context.Allies.FirstOrDefault(ally => ally.Color == attack.Color);
+      }
+  }

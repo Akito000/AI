@@ -1,0 +1,44 @@
+   /// <summary>
+   /// 「危険源から見て、味方(shield)の背後へ回り込む」ための目的地を計算する共通ヘルパー。
+   /// ナビゲーション(NavMesh)やPositionQualitySystem(PQS)のような円周サンプリングは使わず、
+   /// 内積1回で「もう背後側まで回り込めているか」を判定するだけの最小限の実装。
+   /// 回り込めていない間はshieldの横の中継地点を目的地にすることで、直線移動のままでも
+   /// 弧を描くように背後へ寄っていく見た目になる(Urgent Checkのたびに現在位置から再計算されるため)。
+   /// TakeCoverBehindAllyAction/HideBehindAllyForUltimateActionの両方から使う。
+   /// </summary>
+   public static class CoverPositioning
+   {
+       private const float BehindDistance = 2.2f;
+       private const float SideDistance = 2.5f;
+
+       /// <summary>-1(shieldから見て危険源側=真正面)〜+1(真後ろ)。この値以上なら「もう回り込めた」とみなす。</summary>
+       private const float FlankAlignmentThreshold = 0.3f;
+
+       public static Vector3 ComputeApproachBehindPoint(Vector3 selfPosition, Vector3 shieldPosition, Vector3 dangerSourcePosition)
+       {
+           Vector3 awayFromDanger = shieldPosition - dangerSourcePosition;
+           awayFromDanger.y = 0f;
+           awayFromDanger = awayFromDanger.sqrMagnitude > 0.001f ? awayFromDanger.normalized : Vector3.forward;
+
+           Vector3 toSelf = selfPosition - shieldPosition;
+           toSelf.y = 0f;
+
+           float behindAlignment = toSelf.sqrMagnitude > 0.001f
+               ? Vector3.Dot(toSelf.normalized, awayFromDanger)
+               : 1f;
+
+           if (behindAlignment >= FlankAlignmentThreshold)
+           {
+               // 十分に背後側まで回り込めている: そのまま真後ろの地点へ詰める。
+               return shieldPosition + awayFromDanger * BehindDistance;
+           }
+
+           // まだ前方/側面寄り: 現在自分がいる側(内積の符号)の横の中継地点を経由させ、弧を描いて回り込ませる。
+           Vector3 sideDir = Vector3.Cross(Vector3.up, awayFromDanger).normalized;
+           float sideSign = Vector3.Dot(toSelf, sideDir) >= 0f ? 1f : -1f;
+
+           return shieldPosition
+                  + sideDir * (sideSign * SideDistance)
+                  + awayFromDanger * (BehindDistance * 0.3f);
+       }
+   }
