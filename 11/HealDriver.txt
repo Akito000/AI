@@ -1,0 +1,86 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.CharacterInput
+{
+    /// <summary>
+    /// ヒーラー役職の挙動を担当する最小単位のDriver。
+    /// 自分の役割がHealerの時、SpecialActionCommand(開始)を見て回復を発動し、
+    /// SpecialActionReleaseCommand(終了)を見て解除する。実際のHP加算は開始時に1回だけ行う
+    /// プレースホルダー(対象選定システムがまだ無いので今は自分自身が対象)。
+    /// Player(ボタンの押した瞬間/離した瞬間)・NPC(Actionが選ばれた瞬間/選ばれなくなった瞬間)の
+    /// どちらでも、同じ2種類のコマンドだけを見ているので同じロジックで動く。
+    /// </summary>
+    public class HealDriver : CharacterDriverBase
+    {
+        public override int Priority => 150;
+
+        private const float HealAmount = 15f;
+        private const float LongPressDebugLogThreshold = 5f;
+
+        private bool _isActive;
+        private float _heldDuration;
+        private bool _hasLoggedLongPress;
+
+        public override void Execute(CharacterContext context)
+        {
+            if (!context.RoleStatus.Has(RoleFlag.Healer))
+            {
+                _isActive = false;
+                return;
+            }
+
+            var commands = context.Commands;
+
+            // 同じフレームに開始と終了が両方来ることもある(NPCが別の対象へ回復を切り替えた瞬間等)ため、
+            // 終了を先に処理してから開始を処理する。
+            if (_isActive && Contains<SpecialActionReleaseCommand>(commands))
+            {
+                _isActive = false;
+                _heldDuration = 0f;
+                _hasLoggedLongPress = false;
+                Debug.Log($"[HealDriver] {Owner.name}: 回復解除");
+            }
+
+            if (!_isActive && Contains<SpecialActionCommand>(commands))
+            {
+                _isActive = true;
+                _heldDuration = 0f;
+                _hasLoggedLongPress = false;
+                PerformHeal(context);
+            }
+
+            if (_isActive)
+            {
+                // TryStatusは毎フレーム呼び続けている間だけ立ちっぱなしになるので、アクティブな間は毎フレーム呼ぶ。
+                context.Status.TryStatus(StatusFlag.Heal);
+
+                _heldDuration += Time.deltaTime;
+                if (!_hasLoggedLongPress && _heldDuration >= LongPressDebugLogThreshold)
+                {
+                    _hasLoggedLongPress = true;
+                    Debug.Log($"[HealDriver] {Owner.name}: {LongPressDebugLogThreshold}秒間長押し");
+                }
+            }
+        }
+
+        private void PerformHeal(CharacterContext context)
+        {
+            var damageDriver = Owner.GetDriver<DamageDriver>();
+            if (damageDriver != null)
+            {
+                damageDriver.Heal(HealAmount);
+                Debug.Log($"[HealDriver] {Owner.name}: 回復開始・自身を{HealAmount}回復(対象選定は今後追加)");
+            }
+        }
+
+        private static bool Contains<T>(IReadOnlyList<ICommand> commands) where T : ICommand
+        {
+            for (int i = 0; i < commands.Count; i++)
+            {
+                if (commands[i] is T) return true;
+            }
+            return false;
+        }
+    }
+}

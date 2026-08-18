@@ -1,0 +1,108 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「ジョブ切り替え」(Attackerへ)。UtilityAIとゴールベースAIのハイブリッドとして扱う特殊処理
+    /// (Tank用JobChangeToTankAction、Attacker用DestroySpawnerGoalActionと同じ考え方)。
+    ///
+    /// ジョブ交換だけをAct()して終わりにすると、実際に役割が切り替わるまでの間、他の共通Actionやスコアの
+    /// 揺れに割り込まれ、「ジョブは変わったのに誰もスポナーを壊しに向かわない」瞬間が生まれやすい。
+    /// そこでこのActionでは「どのスポナーを狙うか」の初期選定だけをUtility AI(Considerationsによる
+    /// スコア比較)に任せ、一度選んだらそのスポナーが無効(破壊された/対象外になった)になるまでは
+    /// GetTargetCandidatesがそのTargetだけを返し続ける「ゴール」として扱う(DestroySpawnerGoalActionと
+    /// 同じ固定の仕方)。ゴールを持っている間のAct()内部では、①ジョブ交換要求→②間合い外なら接近→
+    /// ③間合い内なら攻撃、という一連の流れを直接実行する。
+    /// 役割が実際にAttackerへ切り替わった後は、RoleGateConsideration(invert)によりこのActionのスコアが
+    /// 0になり、以降は通常のDestroySpawnerGoalActionへ自然に引き継がれる。
+    /// Tank/Healerへの切り替えほど緊急性は高くないため、BaseWeightは2つより低めにしてある
+    /// (それでも他の雑務系Actionよりは優先されるよう、Idle/Wander等よりは十分高い)。
+    /// </summary>
+    public class JobChangeToAttackerAction : IUtilityAction, IMotionLockingAction
+    {
+        public string Name => "JobChangeToAttacker";
+        public float BaseWeight => 1.0f;
+        public bool IsUrgentCapable => true;
+
+        private const float CooldownDuration = 1.2f;
+        private const float DamagePerHit = 10f;
+        private const float AttackMotionLockSeconds = 0.35f;
+
+        /// <summary>現在確定しているゴール(狙っているスポナー)。無効化されるまで他候補を見ない。</summary>
+        private Transform _committedSpawner;
+        private bool _isAttackPhase;
+
+        /// <summary>攻撃フェーズの間だけ専有する(接近フェーズはThinkを毎回再評価させ、経路を追従させたい)。</summary>
+        public float MotionLockSeconds => _isAttackPhase ? AttackMotionLockSeconds : 0f;
+
+        public IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, invert: true, key: "JobChangeToAttacker:NotAttackerYet"),
+            new ColorMatchConsideration("JobChangeToAttacker:ColorMatch"),
+            new DistanceConsideration("JobChangeToAttacker:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "JobChangeToAttacker:Sticky"),
+        };
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            // ゴール確定済み: そのスポナーがまだ有効な間は他候補を一切見ず、これだけを返し続ける
+            // (=毎Thinkの再比較で対象が乗り換わらないようにする、ゴールベースAI的な固定)。
+            if (_committedSpawner != null)
+            {
+                IEnemySpawnerInfo committed = context.Spawners.FirstOrDefault(s => ReferenceEquals(s.Transform, _committedSpawner));
+                if (committed != null)
+                {
+                    yield return committed;
+                    yield break;
+                }
+
+                _committedSpawner = null; // 破壊された/対象外になった: ゴールを解放し、通常のUtility比較に戻す
+                _isAttackPhase = false;
+            }
+
+            // ゴール未確定: 通常のUtility AIと同様、全スポナー候補をConsiderationsで比較させる。
+            foreach (IEnemySpawnerInfo spawner in context.Spawners)
+            {
+                yield return spawner;
+            }
+        }
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IEnemySpawnerInfo spawner || spawner.Transform == null) return;
+
+            _committedSpawner = spawner.Transform; // ここでゴールとして確定する(既に確定済みならそのまま維持)
+
+            // フェーズ0: ジョブ交換。既にAttackerならRoleSwapService側で何もしないため、
+            // 反映が済むまで毎Think送り続けても無害(RequestRoleは既に目的の役割を持っていればno-op)。
+            if (context.SelfRole != RoleFlag.Attacker)
+            {
+                result.Commands.Add(new RoleSwapRequestCommand(RoleFlag.Attacker));
+            }
+
+            float distance = context.DistanceTo(spawner.Position);
+            if (distance > AttackerTuning.MeleeRange)
+            {
+                // フェーズ1: 接近。間合いに入るまでは攻撃せず、ひたすら近づく。
+                _isAttackPhase = false;
+                result.MoveDestination = SimpleObstacleAvoidance.AvoidEnemiesOnPath(context, spawner.Position);
+                return;
+            }
+
+            // フェーズ2: 攻撃。間合いに入ったらその場に留まり(MoveDestinationには触れない)、
+            // クールダウンが空いていれば殴り続ける。
+            _isAttackPhase = true;
+            if (!context.Cooldowns.IsReady(Name)) return;
+
+            context.Cooldowns.SetCooldown(Name, CooldownDuration);
+            result.Commands.Add(new WeakAttackCommand(spawner.Transform.gameObject));
+
+            EnemySpawner spawnerComponent = spawner.Transform.GetComponent<EnemySpawner>();
+            spawnerComponent?.TakeDamage(DamagePerHit);
+        }
+    }
+}
