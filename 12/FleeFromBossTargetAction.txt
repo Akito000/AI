@@ -1,0 +1,55 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.World;
+
+namespace Game.AI
+{
+    /// <summary>
+    /// 共通行動候補の「自分がボスに狙われた瞬間、真っ先にボスから離れる」(確定行動)。
+    /// EnemyTargetState.CurrentTargetが自分になっている間、ボスの反対方向へ距離を取り続ける。
+    ///
+    /// BaseWeightはBlockUltimateAttackAction/HideBehindAllyForUltimateActionと同じ既存の最大値にしてあり、
+    /// 特別なif/elseの例外処理を書かなくても、Utility Scoreの比較だけで
+    /// 「狙われたら他の全行動より必ずこれが選ばれる」を実現する(このゲームのUtility AIの設計方針を踏襲)。
+    /// IsUrgentCapable=trueでUrgent Check(0.1秒間隔)にも参加させ、狙われた直後の反応を速くする。
+    ///
+    /// 選ばれた後はIMotionLockingActionでMotionLockSecondsの間Thinkを止め、離脱の途中で
+    /// 別の判断に上書きされないようにする(Urgent Checkはロック中も動き続けるため、超必殺のような
+    /// 本当に緊急の行動が来た場合は専有中でも割り込める)。
+    /// </summary>
+    public class FleeFromBossTargetAction : MoveToTargetActionBase, IMotionLockingAction
+    {
+        public override string Name => "FleeFromBossTarget";
+        public override float BaseWeight => 5f;
+        public override bool IsUrgentCapable => true;
+
+        private const float RetreatDistance = 8f;
+        private const float MotionLockDurationSeconds = 1.2f;
+
+        public float MotionLockSeconds => MotionLockDurationSeconds;
+
+        public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new ConstantConsideration(1f, "FleeFromBossTarget:Baseline"),
+        };
+
+        public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            if (context.Boss != null && context.Boss.IsAlive && EnemyTargetState.CurrentTarget == context.Self)
+            {
+                yield return context.Boss;
+            }
+        }
+
+        public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IBossInfo boss) return;
+
+            Vector3 awayDirection = context.SelfPosition - boss.Position;
+            awayDirection.y = 0f;
+            awayDirection = awayDirection.sqrMagnitude > 0.001f ? awayDirection.normalized : Vector3.forward;
+
+            result.MoveDestination = context.SelfPosition + awayDirection * RetreatDistance;
+        }
+    }
+}

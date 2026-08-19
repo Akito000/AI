@@ -1,0 +1,75 @@
+    public class DestroySpawnerGoalAction : IUtilityAction, IMotionLockingAction
+    {
+        public string Name => "DestroySpawnerGoal";
+        public float BaseWeight => 1.0f;
+        public bool IsUrgentCapable => false;
+
+        private const float CooldownDuration = 1.2f;
+        private const float DamagePerHit = 10f;
+        private const float AttackMotionLockSeconds = 0.35f;
+
+        /// <summary>現在確定しているゴール(狙っているスポナー)。無効化されるまで他候補を見ない。</summary>
+        private Transform _committedSpawner;
+        private bool _isAttackPhase;
+
+        /// <summary>攻撃フェーズの間だけ専有する(接近フェーズはThinkを毎回再評価させ、経路を追従させたい)。</summary>
+        public float MotionLockSeconds => _isAttackPhase ? AttackMotionLockSeconds : 0f;
+
+        public IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+        {
+            new RoleGateConsideration(RoleFlag.Attacker, key: "DestroySpawnerGoal:IsAttacker"),
+            new ColorMatchConsideration("DestroySpawnerGoal:ColorMatch"),
+            new DistanceConsideration("DestroySpawnerGoal:PreferNearest", AttackerTuning.SearchRadius, preferNear: true),
+            new StickyTargetConsideration(key: "DestroySpawnerGoal:Sticky"),
+        };
+
+        public IEnumerable<object> GetTargetCandidates(UtilityContext context)
+        {
+            // ゴール確定済み: そのスポナーがまだ有効な間は他候補を一切見ず、これだけを返し続ける
+            // (=毎Thinkの再比較で対象が乗り換わらないようにする、ゴールベースAI的な固定)。
+            if (_committedSpawner != null)
+            {
+                IEnemySpawnerInfo committed = context.Spawners.FirstOrDefault(s => ReferenceEquals(s.Transform, _committedSpawner));
+                if (committed != null)
+                {
+                    yield return committed;
+                    yield break;
+                }
+
+                _committedSpawner = null; // 破壊された/対象外になった: ゴールを解放し、通常のUtility比較に戻す
+            }
+
+            // ゴール未確定: 通常のUtility AIと同様、全スポナー候補をConsiderationsで比較させる。
+            foreach (IEnemySpawnerInfo spawner in context.Spawners)
+            {
+                yield return spawner;
+            }
+        }
+
+        public void Act(UtilityContext context, object target, NpcDecisionResult result)
+        {
+            if (target is not IEnemySpawnerInfo spawner || spawner.Transform == null) return;
+
+            _committedSpawner = spawner.Transform; // ここでゴールとして確定する(既に確定済みならそのまま維持)
+
+            float distance = context.DistanceTo(spawner.Position);
+            if (distance > AttackerTuning.MeleeRange)
+            {
+                // フェーズ1: 接近。間合いに入るまでは攻撃せず、ひたすら近づく。
+                _isAttackPhase = false;
+                result.MoveDestination = SimpleObstacleAvoidance.AvoidEnemiesOnPath(context, spawner.Position);
+                return;
+            }
+
+            // フェーズ2: 攻撃。間合いに入ったらその場に留まり(MoveDestinationには触れない)、
+            // クールダウンが空いていれば殴り続ける。
+            _isAttackPhase = true;
+            if (!context.Cooldowns.IsReady(Name)) return;
+
+            context.Cooldowns.SetCooldown(Name, CooldownDuration);
+            result.Commands.Add(new WeakAttackCommand(spawner.Transform.gameObject));
+
+            EnemySpawner spawnerComponent = spawner.Transform.GetComponent<EnemySpawner>();
+            spawnerComponent?.TakeDamage(DamagePerHit);
+        }
+    }
