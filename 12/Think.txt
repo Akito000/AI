@@ -1,0 +1,217 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Game.CharacterInput;
+
+namespace Game.AI
+{
+ 
+    public class NpcThinkDriver : CharacterDriverBase
+    {
+        public override int Priority => 1000;
+
+        private const float ThinkIntervalSeconds = 0.4f;
+        private const float UrgentCheckIntervalSeconds = 0.1f;
+        private const float UrgentScoreThreshold = 0.85f;
+
+        private float _motionLockedUntil;
+
+        private readonly List<IUtilityAction> _actions;
+        private readonly List<IUtilityAction> _urgentActions;
+        private readonly UtilityAIWeightTable _weightTable;
+        private readonly CooldownTracker _cooldowns = new CooldownTracker();
+        private readonly NpcNavMeshMover _mover = new NpcNavMeshMover();
+        private readonly NpcDecisionResult _currentDecision = new NpcDecisionResult();
+        private readonly List<ICommand> _pendingOneShotCommands = new List<ICommand>(2);
+        private readonly List<ICommand> _frameCommands = new List<ICommand>(4);
+
+        private DamageDriver _selfDamage;
+        private NpcDebugLabel _debugLabel;
+        private bool _debugLabelResolved;
+
+        private float _nextThinkTime;
+        private float _nextUrgentCheckTime;
+
+        public IUtilityAction CurrentAction => _currentDecision.Action;
+        public object CurrentTarget => _currentDecision.Target;
+        public Vector3? CurrentMoveDestination => _currentDecision.MoveDestination;
+        public IReadOnlyList<ActionCandidate> LastEvaluation { get; private set; } = System.Array.Empty<ActionCandidate>();
+
+        public NpcThinkDriver(IEnumerable<IUtilityAction> actions, UtilityAIWeightTable weightTable)
+        {
+            _actions = new List<IUtilityAction>(actions);
+            _urgentActions = _actions.FindAll(a => a.IsUrgentCapable);
+            _weightTable = weightTable;
+        }
+
+        public override void Execute(CharacterContext context)
+        {
+            if (_selfDamage == null)
+            {
+                _selfDamage = Owner.GetDriver<DamageDriver>();
+            }
+            if (!_debugLabelResolved)
+            {
+                _debugLabel = Owner.GetComponent<NpcDebugLabel>();
+                if (_debugLabel == null)
+                {
+                    _debugLabel = Owner.gameObject.AddComponent<NpcDebugLabel>();
+                }
+                _debugLabelResolved = true;
+            }
+
+            // RoleStatusの変更はCharacterStatus/RoleStatus共通の設計上、AddStatus直後ではなく次のTick()まで
+            // 反映されない。起動直後の1フレーム目はまだ役割が確定していないことがあるため、
+            // 役割が定まるまでは思考せずに待つ(その間はcontext.Commandsが空=Idle相当になるだけで安全)。
+            if (RoleSwapService.GetPrimaryRole(Owner) == RoleFlag.None)
+            {
+                return;
+            }
+
+            float now = Time.time;
+            bool isMotionLocked = now < _motionLockedUntil;
+
+            if (!isMotionLocked && now >= _nextThinkTime)
+            {
+                _nextThinkTime = now + ThinkIntervalSeconds;
+                _nextUrgentCheckTime = now + UrgentCheckIntervalSeconds;
+                Think(_actions);
+            }
+            else if (now >= _nextUrgentCheckTime)
+            {
+                _nextUrgentCheckTime = now + UrgentCheckIntervalSeconds;
+                ThinkUrgentOnly();
+            }
+
+            _frameCommands.Clear();
+
+            Vector2 moveDirection = _mover.GetMoveDirection(Owner.transform.position, _currentDecision.MoveDestination);
+            _frameCommands.Add(moveDirection.sqrMagnitude > 0.0001f ? new MoveCommand(moveDirection) : IdleCommand.Instance);
+
+            // 弱攻撃/特殊行動/ジョブ交換要求/リリースは、ApplyDecisionが呼ばれたそのフレームだけ発行する
+            // 単発コマンド(Playerの「押した瞬間」「離した瞬間」と同じ扱い。毎フレーム出し続けたりはしない)。
+            if (_pendingOneShotCommands.Count > 0)
+            {
+                _frameCommands.AddRange(_pendingOneShotCommands);
+                _pendingOneShotCommands.Clear();
+            }
+
+            context.Commands = _frameCommands;
+        }
+
+        private void Think(List<IUtilityAction> actionsToEvaluate)
+        {
+            UtilityContext utilityContext = BuildContext();
+            var evaluationLog = new List<ActionCandidate>();
+
+            ActionCandidate best = default;
+            bool hasBest = false;
+
+            for (int i = 0; i < actionsToEvaluate.Count; i++)
+            {
+                IUtilityAction action = actionsToEvaluate[i];
+                foreach (object target in action.GetTargetCandidates(utilityContext))
+                {
+                    ActionCandidate candidate = UtilityScorer.Evaluate(utilityContext, action, target, true);
+                    evaluationLog.Add(candidate);
+
+                    if (!hasBest || candidate.Score > best.Score)
+                    {
+                        best = candidate;
+                        hasBest = true;
+                    }
+                }
+            }
+
+            LastEvaluation = evaluationLog;
+            if (hasBest)
+            {
+                ApplyDecision(utilityContext, best);
+            }
+        }
+
+        private void ThinkUrgentOnly()
+        {
+            if (_urgentActions.Count == 0) return;
+
+            UtilityContext utilityContext = BuildContext();
+
+            ActionCandidate best = default;
+            bool hasBest = false;
+
+            for (int i = 0; i < _urgentActions.Count; i++)
+            {
+                IUtilityAction action = _urgentActions[i];
+                foreach (object target in action.GetTargetCandidates(utilityContext))
+                {
+                    ActionCandidate candidate = UtilityScorer.Evaluate(utilityContext, action, target, true);
+                    if (!hasBest || candidate.Score > best.Score)
+                    {
+                        best = candidate;
+                        hasBest = true;
+                    }
+                }
+            }
+
+            if (!hasBest || best.Score < UrgentScoreThreshold) return;
+
+            bool isSameAsCurrent = best.Action == _currentDecision.Action && Equals(best.Target, _currentDecision.Target);
+            if (isSameAsCurrent) return;
+
+            ApplyDecision(utilityContext, best);
+        }
+
+        private void ApplyDecision(UtilityContext utilityContext, ActionCandidate candidate)
+        {
+            // Action自体か対象が変わる「本当の切り替え」のときだけ、直前のActionの「離した」コマンドを出す。
+            // 同じAction+同じTargetを選び直しただけ(Thinkが再確認しただけ)なら継続中とみなし、離した扱いにはしない。
+            bool isActuallyChanging = !ReferenceEquals(_currentDecision.Action, candidate.Action)
+                                       || !Equals(_currentDecision.Target, candidate.Target);
+
+            ICommand releaseCommand = null;
+            if (isActuallyChanging && _currentDecision.Action is IReleasableAction releasable)
+            {
+                releaseCommand = releasable.CreateReleaseCommand(utilityContext, _currentDecision.Target);
+            }
+
+            _currentDecision.Reset();
+            _currentDecision.Action = candidate.Action;
+            _currentDecision.Target = candidate.Target;
+
+            candidate.Action.Act(utilityContext, candidate.Target, _currentDecision);
+
+            _pendingOneShotCommands.Clear();
+            if (releaseCommand != null)
+            {
+                _pendingOneShotCommands.Add(releaseCommand);
+            }
+            _pendingOneShotCommands.AddRange(_currentDecision.Commands);
+
+            // 新しい決定のたびにロック状態を丸ごと置き換える。IMotionLockingActionでなければ0=専有なし。
+            float lockSeconds = candidate.Action is IMotionLockingAction locking ? locking.MotionLockSeconds : 0f;
+            _motionLockedUntil = utilityContext.Now + lockSeconds;
+
+            string targetDescription = TargetUtility.DescribeForDebug(candidate.Target);
+            string message = targetDescription != null
+                ? $"[NpcThinkDriver] {Owner.name}: {candidate.Action.Name} -> {targetDescription} (score={candidate.Score:F2})"
+                : $"[NpcThinkDriver] {Owner.name}: {candidate.Action.Name} (score={candidate.Score:F2})";
+            Debug.Log(message);
+
+            _debugLabel?.SetText(targetDescription != null
+                ? $"{candidate.Action.Name}\n→{targetDescription}"
+                : candidate.Action.Name);
+        }
+
+        private UtilityContext BuildContext()
+        {
+            return new UtilityContext(
+                Owner,
+                _selfDamage,
+                PartyRegistry.Members,
+                _currentDecision.Target,
+                _currentDecision.Action?.Name,
+                _cooldowns,
+                _weightTable);
+        }
+    }
+}
+
