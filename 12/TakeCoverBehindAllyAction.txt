@@ -1,0 +1,45 @@
+ public class TakeCoverBehindAllyAction : MoveToTargetActionBase
+ {
+     public override string Name => "TakeCoverBehindAlly";
+     public override float BaseWeight => 1.15f;
+     public override bool IsUrgentCapable => true;
+
+     private const float ReactionWindowSeconds = 2.5f;
+
+     public override IReadOnlyList<IConsideration> Considerations { get; } = new IConsideration[]
+     {
+         new RoleGateConsideration(RoleFlag.Tank, invert: true, key: "TakeCover:NotTank"),
+         new DangerConsideration("TakeCover:Danger", easeIn: true),
+         new TimeToImpactConsideration(ReactionWindowSeconds, "TakeCover:TimeToImpact"),
+     };
+
+     public override IEnumerable<object> GetTargetCandidates(UtilityContext context)
+     {
+         foreach (IIncomingAttackInfo attack in context.IncomingAttacks)
+         {
+             if (attack.TargetPlayer != context.Self) continue;
+             if (FindShieldAlly(context, attack) == null) continue;
+             yield return attack;
+         }
+     }
+
+     public override void Act(UtilityContext context, object target, NpcDecisionResult result)
+     {
+         if (target is not IIncomingAttackInfo attack) return;
+
+         CharacterUpdater shield = FindShieldAlly(context, attack);
+         if (shield == null) return;
+
+         Vector3 coverPoint = CoverPositioning.ComputeApproachBehindPoint(
+             context.SelfPosition, shield.transform.position, attack.Position);
+
+         // 回り込み先のshield自身は障害物から除外しないと、目的地のすぐ隣にいるshieldを
+         // 「経路を塞ぐ相手」とみなして避けてしまい、いつまでも背後へ辿り着けなくなる。
+         result.MoveDestination = SimpleObstacleAvoidance.AvoidAlliesAndEnemiesOnPath(context, coverPoint, shield);
+     }
+
+     private static CharacterUpdater FindShieldAlly(UtilityContext context, IIncomingAttackInfo attack)
+     {
+         return context.Allies.FirstOrDefault(ally => ally.Color == attack.Color);
+     }
+ }
