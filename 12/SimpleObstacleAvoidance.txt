@@ -1,0 +1,113 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Game.CharacterInput;
+using Game.World;
+
+namespace Game.AI
+{
+  
+    public static class SimpleObstacleAvoidance
+    {
+        private const float DefaultCorridorWidth = 1.5f;
+        private const float DefaultClearance = 2.2f;
+
+        /// <summary>経路上の敵だけを避ける(従来通り)。</summary>
+        public static vec3 AvoidEnemiesOnPath(
+            UtilityContext context,
+            vec3 goal,
+            float corridorWidth = DefaultCorridorWidth,
+            float clearance = DefaultClearance)
+        {
+            return AvoidBlockersOnPath(context.SelfPosition, goal, EnemyPositions(context), corridorWidth, clearance);
+        }
+
+        /// <summary>
+        /// 経路上の敵と味方の両方を避ける。タンクの後ろへ回り込む(CoverPositioning)ような、
+        /// 複数の味方が同じ地点付近へ収束しがちな移動で使う。
+        /// ignoreAllyには回り込み先の味方(shield/tank)自身を渡すこと。渡さないと、
+        /// 目的地のすぐ隣にいる回り込み先自身を「経路を塞ぐ障害物」とみなして避けてしまい、
+        /// いつまでも背後へ辿り着けなくなる。
+        /// </summary>
+        public static vec3 AvoidAlliesAndEnemiesOnPath(
+            UtilityContext context,
+            vec3 goal,
+            CharacterUpdater ignoreAlly,
+            float corridorWidth = DefaultCorridorWidth,
+            float clearance = DefaultClearance)
+        {
+            IEnumerable<vec3> blockers = EnemyPositions(context).Concat(AllyPositions(context, ignoreAlly));
+            return AvoidBlockersOnPath(context.SelfPosition, goal, blockers, corridorWidth, clearance);
+        }
+
+        private static IEnumerable<vec3> EnemyPositions(UtilityContext context)
+        {
+            foreach (IEnemyInfo enemy in context.Enemies)
+            {
+                if (enemy.IsAlive) yield return enemy.Position;
+            }
+        }
+
+        private static IEnumerable<vec3> AllyPositions(UtilityContext context, CharacterUpdater ignoreAlly)
+        {
+            foreach (CharacterUpdater ally in context.Allies)
+            {
+                if (ally != null && ally != ignoreAlly) yield return ally.transform.position;
+            }
+        }
+
+        private static vec3 AvoidBlockersOnPath(
+            vec3 selfPos,
+            vec3 goal,
+            IEnumerable<vec3> blockerPositions,
+            float corridorWidth,
+            float clearance)
+        {
+            vec3 toGoal = goal - selfPos;
+            toGoal.y = 0f;
+            float distanceToGoal = toGoal.magnitude;
+            if (distanceToGoal < 0.01f) return goal;
+
+            vec3 pathDir = toGoal / distanceToGoal;
+
+            vec3? blockerPos = null;
+            float blockerAlongDist = float.MaxValue;
+
+            foreach (vec3 pos in blockerPositions)
+            {
+                vec3 toBlocker = pos - selfPos;
+                toBlocker.y = 0f;
+
+                // 経路(pathDir)への射影(内積) = その相手が自分からどれだけ「前方」にいるか。
+                float alongDist = vec3.Dot(toBlocker, pathDir);
+                // 自分より後ろ、あるいはgoalより奥にいる相手は経路を塞がない。
+                if (alongDist <= 0f || alongDist >= distanceToGoal) continue;
+
+                vec3 nearestOnPath = selfPos + pathDir * alongDist;
+                float lateralDist = vec3.Distance(pos, nearestOnPath);
+                if (lateralDist >= corridorWidth) continue;
+
+                // 一番手前(自分に近い側)で塞いでいる相手を優先して避ける。
+                if (alongDist < blockerAlongDist)
+                {
+                    blockerAlongDist = alongDist;
+                    blockerPos = pos;
+                }
+            }
+
+            if (blockerPos == null) return goal;
+
+            vec3 nearestOnPathToBlocker = selfPos + pathDir * blockerAlongDist;
+            vec3 lateralOffset = blockerPos.Value - nearestOnPathToBlocker;
+            lateralOffset.y = 0f;
+
+            // 経路に垂直な方向(外積)。相手が経路からどちら側へズレているかで、逆側へ避けて
+            // クリアランスを大きく取る(相手がほぼ真正面でズレが無い場合は常に同じ側へ避ける)。
+            vec3 sideDir = vec3.Cross(vec3.up, pathDir).normalized;
+            float lateralSign = vec3.Dot(lateralOffset, sideDir);
+            float avoidSign = lateralSign > 0.05f ? -1f : 1f;
+
+            return blockerPos.Value + sideDir * (avoidSign * clearance);
+        }
+    }
+}
